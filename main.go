@@ -1,8 +1,7 @@
 package main
 
-import "fmt"
+import "github.com/amrox/aworkspace/cmd"
 
 func main() {
-	fmt.Println("aworkspace")
+	cmd.Execute()
 }
-
