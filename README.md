@@ -20,10 +20,11 @@ aworkspace uses **git worktrees** to create isolated working directories for eac
 ~/Workspaces/                   # Workspaces
   my-feature/
     workspace.toml              # Workspace config
-    README.md                   # Goals, context, notes
-    repos/
-      repo-a/                   # Worktree (branch: my-feature)
-      repo-b/                   # Worktree (branch: my-feature)
+    WORKSPACE.md                # Goals, context, notes
+    CLAUDE.md                   # Agent instructions
+    code/
+      repo-a/                   # Worktree (branch: ws/my-feature)
+      repo-b/                   # Worktree (branch: ws/my-feature)
 ```
 
 ## Installation
@@ -65,7 +66,7 @@ aworkspace doctor
 
 ### `aworkspace new <name>`
 
-Create a new workspace. Creates the directory structure and initializes `workspace.toml` and `README.md`.
+Create a new workspace. Creates the directory structure and initializes `workspace.toml`, `WORKSPACE.md`, and `CLAUDE.md`.
 
 **Options:**
 - `--from <workspace>` — Clone an existing workspace's repo list with fresh branches
@@ -157,9 +158,9 @@ Use this to get back to a known-good state, especially after experimental change
 ### `aworkspace doctor`
 
 Check your environment for common issues:
-- Git version (needs >= 2.48 for relative worktree paths)
-- `worktree.useRelativePaths` config
+- Git configuration and version
 - Stale worktrees
+- Workspace/config file validity
 
 ## Configuration
 
@@ -167,15 +168,15 @@ Config file: `~/.config/aworkspace/config.toml`
 
 ```toml
 workspaces_dir = "~/Workspaces"
-repos_dir = "~/Repos"
-branch_prefix = ""
+bares_dir = "~/Repos"
+branch_prefix = "ws/"
 init_submodules = false
 ```
 
 **Options:**
 - `workspaces_dir` — Where workspaces are created (default: `~/Workspaces`)
-- `repos_dir` — Where bare clones are stored (default: `~/Repos`)
-- `branch_prefix` — Optional prefix for auto-generated branches
+- `bares_dir` — Where bare clones are stored (default: `~/Repos`)
+- `branch_prefix` — Prefix for auto-generated workspace branches (default: `"ws/"`)
 - `init_submodules` — Whether to initialize submodules in worktrees (default: `false`)
 
 ### Bookmarks
@@ -203,14 +204,14 @@ aworkspace add-repo work:gitlab-runners  # -> git@gitlab.company.com:team-infra/
 
 ## Branch Naming
 
-By default, aworkspace creates branches named after the workspace (e.g., workspace `my-feature` → branch `my-feature`). You can configure a prefix:
+By default, aworkspace creates branches with the `ws/` prefix (e.g., workspace `my-feature` → branch `ws/my-feature`). You can configure a different prefix or use no prefix:
 
 ```toml
 # config.toml
-branch_prefix = "ws/"
+branch_prefix = "ws/"     # default
+# branch_prefix = ""      # no prefix: workspace name = branch name
+# branch_prefix = "aw-"   # flat prefix: my-feature → aw-my-feature
 ```
-
-Then workspace `my-feature` creates branches `ws/my-feature`.
 
 This is useful for:
 - **Organization** — keeping workspace branches separate from other branch types
@@ -246,29 +247,33 @@ branch = "my-feature"
 bare = "~/Repos/repo-b.git"
 ```
 
-**`README.md`** — Human-readable context, goals, notes
+**`WORKSPACE.md`** — Human-readable context, goals, notes (avoids collision with repo READMEs)
 
-**`repos/`** — Directory containing all worktrees
+**`CLAUDE.md`** — Agent instructions explaining workspace isolation rules
+
+**`code/`** — Directory containing all worktrees
 
 ## Benefits
 
 - **Organized multi-repo work** — All repos for a feature in one place
 - **Isolated branches** — Each workspace gets its own branches, no cross-contamination
-- **Context capture** — `README.md` documents what you're doing and why
+- **Context capture** — `WORKSPACE.md` documents what you're doing and why
+- **Agent-friendly** — `CLAUDE.md` automatically explains workspace isolation rules to AI agents
 - **Efficient disk usage** — Bare repos are shared, worktrees are lightweight
-- **Works well with AI coding agents** — Focused scope and context files help tools understand boundaries
 
 ## Git Worktree Notes
 
 ### Relative Paths for Devcontainers
 
-Git worktrees use absolute paths by default, which breaks inside devcontainers. Git 2.48+ supports relative paths:
+**Note:** This is a git configuration, not an aworkspace feature.
+
+Git worktrees use absolute paths by default, which breaks inside devcontainers (the paths reference the host filesystem). Git 2.48+ supports relative worktree paths:
 
 ```bash
 git config --global worktree.useRelativePaths true
 ```
 
-`aworkspace doctor` checks for this.
+With this setting, git creates worktrees with relative paths that work correctly when the workspace is bind-mounted into a container. This is entirely managed by git — aworkspace just creates worktrees using `git worktree add`, and git handles the path format based on your config.
 
 ### Submodules
 

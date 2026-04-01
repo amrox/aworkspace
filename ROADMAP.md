@@ -1,5 +1,34 @@
 # aworkspace Roadmap
 
+## Design Notes
+
+**Branch prefix:** Default is `"ws/"` (e.g., workspace `my-feature` creates branches `ws/my-feature`). This prefix:
+- Clearly marks workspace-managed branches as plumbing (not real topic branches)
+- Avoids locking the repo's default branch across multiple workspaces
+- Enables clean lifecycle operations (`rm` can safely delete `ws/*` branches)
+- Is configurable via `branch_prefix` in config
+
+**Branch collision handling:** If a `ws/<name>` branch already exists or is already checked out, `add-repo` will fail with a clear error. No auto-suffixing or magic renaming. This should be rare since `ws/` is aworkspace's namespace. If it happens, it usually means a workspace was removed without cleanup (which `doctor` would flag).
+
+**Open question (0.1 decision required):** Workspace context file naming. Options:
+- `WORKSPACE.md` — Avoids collision with repo READMEs, clear purpose. Current leaning.
+- `README.md` — More conventional, but conflicts when repos have their own READMEs in `code/`
+- Workspace-level `README.md` at root + repo READMEs in `code/*/` — Could work but feels redundant
+
+Decision needed before implementing `new` command. Current direction: `WORKSPACE.md` for clarity and avoiding collisions.
+
+**Agent context:** Workspaces should include a default `CLAUDE.md` that explains workspace structure to agents. Key rules that need to be communicated:
+- Repos in the workspace are independent projects (don't cross-reference between them)
+- Each repo will be committed separately
+- The workspace is temporary scaffolding for development
+
+This needs to be configurable:
+- Default template for `aworkspace new` should include a sensible `CLAUDE.md`
+- Config option to disable auto-creation of `CLAUDE.md`
+- Support for custom workspace templates (user-defined scaffolding)
+
+Without this, every agent session requires manual explanation of workspace isolation rules.
+
 ## Milestone 0.1 - Core Functionality
 
 Goal: Get the basic workspace management working. Create, list, and manage workspaces with multiple repos.
@@ -9,7 +38,9 @@ Goal: Get the basic workspace management working. Create, list, and manage works
 - [ ] **Core data types** — `Workspace`, `Repo`, `Config` structs in `internal/workspace/`
 - [ ] **Config loading** — Read/write `~/.config/aworkspace/config.toml` with defaults
 - [ ] **Workspace discovery** — Find workspace by walking up from cwd to locate `workspace.toml`
-- [ ] **`aworkspace new <name>`** — Create workspace directory with `workspace.toml` and `README.md`
+- [ ] **`aworkspace new <name>`** — Create workspace directory with `workspace.toml`, `WORKSPACE.md`, and `CLAUDE.md`
+  - `CLAUDE.md` includes default workspace isolation rules for agents
+  - Makes agents immediately understand that repos are independent projects
 - [ ] **`aworkspace list`** — List all workspaces (basic: name only)
 - [ ] **`aworkspace show`** — Display current workspace info (repos, branches, status)
 - [ ] **`aworkspace add-repo <url> [branch]`** — Clone bare repo + create worktree
@@ -46,6 +77,8 @@ Goal: Get the basic workspace management working. Create, list, and manage works
 - [ ] `aworkspace reset` — reset workspace to clean state
 - [ ] Bookmarks for common git hosts
 - [ ] `--from` flag for cloning workspaces
+- [ ] **Configurable `CLAUDE.md` generation** — Config option to disable auto-creation of `CLAUDE.md`
+- [ ] **Workspace templates** — User-defined templates for `new` command (scaffolding, standard files, custom CLAUDE.md)
 
 ## Milestone 0.3 - Quality of Life
 
@@ -59,6 +92,7 @@ Goal: Get the basic workspace management working. Create, list, and manage works
   - `--format <template>` — custom output format
   - Sortable fields (name, created, modified, status)
   - Filter by status or other attributes
+- [ ] **Optional workspace subtitle** — One-line description field in `workspace.toml` (e.g., `subtitle = "Q2 nav rewrite"`), shown in `list -l`
 
 ## Future
 
