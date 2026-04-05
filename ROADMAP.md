@@ -29,6 +29,8 @@ This needs to be configurable:
 
 Without this, every agent session requires manual explanation of workspace isolation rules.
 
+**Checkout roles (edit vs reference):** Each repo checkout in a workspace could be tagged as either "edit" (actively being developed) or "reference" (read-only context for agents). For example, a workspace might have `my-service` as the edit target while `shared-lib` and `api-spec` are references. This distinction is purely advisory — it helps agents understand which code they should be modifying vs. just reading for context. Could be a field in `workspace.toml` per-repo entry.
+
 ## Milestone 0.1 - Core Functionality
 
 Goal: Get the basic workspace management working. Create, list, and manage workspaces with multiple repos.
