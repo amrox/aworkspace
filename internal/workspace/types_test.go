@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -80,4 +81,46 @@ func TestDefaultConfig(t *testing.T) {
 	if config.BranchPrefix != "ws/" {
 		t.Errorf("BranchPrefix = %v, want 'ws/'", config.BranchPrefix)
 	}
+}
+
+func TestLoadConfigFromBytes(t *testing.T) {
+
+	t.Run("empty input returns defaults", func(t *testing.T) {
+		var empty []byte
+		defaultConfig := DefaultConfig()
+
+		config, err := LoadConfigFromBytes(empty)
+		if err != nil {
+			t.Fatalf("LoadConfigFromBytes returned unexpected error: %v:", err)
+		}
+
+		if config != defaultConfig {
+			t.Errorf("got = %+v, want %+v", config, defaultConfig)
+		}
+	})
+
+	t.Run("partial input merges with defaults", func(t *testing.T) {
+		customPrefix := "qqq/"
+		doc := fmt.Sprintf(`
+			branch_prefix = "%s"
+		`, customPrefix)
+		defaultConfig := DefaultConfig()
+
+		config, err := LoadConfigFromBytes([]byte(doc))
+		if err != nil {
+			t.Fatalf("LoadConfigFromBytes returned unexpected error: %v:", err)
+		}
+
+		if config.BranchPrefix != customPrefix {
+			t.Errorf("BranchPrefix = %v, want %v", config.BranchPrefix, customPrefix)
+		}
+
+		if config.BaresDir != defaultConfig.BaresDir {
+			t.Errorf("BaresDir = %v, want %v", config.BaresDir, defaultConfig.BaresDir)
+		}
+
+		if config.WorkspacesDir != defaultConfig.WorkspacesDir {
+			t.Errorf("WorkspacesDir = %v, want %v", config.WorkspacesDir, defaultConfig.WorkspacesDir)
+		}
+	})
 }

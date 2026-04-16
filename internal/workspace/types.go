@@ -1,16 +1,17 @@
 package workspace
 
 import (
-	"errors"
 	"os"
 	"path/filepath"
+
+	"github.com/pelletier/go-toml/v2"
 )
 
 type Config struct {
-	BaresDir      string
-	WorkspacesDir string
+	BaresDir      string `toml:"bares_dir"`
+	WorkspacesDir string `toml:"workspaces_dir"`
 
-	BranchPrefix string
+	BranchPrefix string `toml:"branch_prefix"`
 
 	// TODO: this is adapted from "init_submodules"
 	// I can think of 3 modes: "none", "init", "worktree-init"
@@ -37,9 +38,18 @@ func DefaultConfig() Config {
 	}
 }
 
-func LoadConfig(path string) (Config, error) {
+func LoadConfigFromBytes(doc []byte) (Config, error) {
+	config := DefaultConfig()
+	err := toml.Unmarshal(doc, &config)
+	return config, err
+}
+
+func LoadConfigFromPath(path string) (Config, error) {
 	var config Config
-	err := errors.New("not yet implemented")
+	data, err := os.ReadFile(path)
+	if err == nil {
+		config, err = LoadConfigFromBytes(data)
+	}
 	return config, err
 }
 
@@ -48,7 +58,7 @@ func LoadOrDefaultConfig(path string) (Config, error) {
 		path = DefaultConfigPath()
 	}
 
-	config, err := LoadConfig(path)
+	config, err := LoadConfigFromPath(path)
 	if os.IsNotExist(err) {
 		return DefaultConfig(), nil
 	}
