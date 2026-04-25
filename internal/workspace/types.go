@@ -1,11 +1,15 @@
 package workspace
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 
 	"github.com/pelletier/go-toml/v2"
 )
+
+// Errors
+var ErrNotInWorkspace = errors.New("not inside a workspace")
 
 type Config struct {
 	BaresDir      string `toml:"bares_dir"`
@@ -71,4 +75,22 @@ type Workspace struct {
 
 type Repo struct {
 	path string
+}
+
+func FindWorkspaceDir(startDir string) (string, error) {
+	dir := startDir
+
+	for {
+		_, err := os.Stat(filepath.Join(dir, "workspace.toml"))
+		if err == nil {
+			return dir, nil
+		} else if !os.IsNotExist(err) {
+			return "", err
+		}
+		nextDir := filepath.Dir(dir)
+		if dir == nextDir {
+			return "", ErrNotInWorkspace
+		}
+		dir = nextDir
+	}
 }

@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -121,6 +122,51 @@ func TestLoadConfigFromBytes(t *testing.T) {
 
 		if config.WorkspacesDir != defaultConfig.WorkspacesDir {
 			t.Errorf("WorkspacesDir = %v, want %v", config.WorkspacesDir, defaultConfig.WorkspacesDir)
+		}
+	})
+}
+
+func TestFindWorkspaceDir(t *testing.T) {
+	t.Run("finds workspace in current dir", func(t *testing.T) {
+		dir := t.TempDir()
+		os.WriteFile(filepath.Join(dir, "workspace.toml"), []byte{}, 0644)
+
+		got, err := FindWorkspaceDir(dir)
+
+		if err != nil {
+			t.Fatalf("FindWorkspaceDir returned unexpected error: %v:", err)
+		}
+
+		if got != dir {
+			t.Errorf("FindWorkspacesDir = %v, want %v", got, dir)
+		}
+	})
+
+	t.Run("finds workspace in parent dir", func(t *testing.T) {
+		root := t.TempDir()
+		os.WriteFile(filepath.Join(root, "workspace.toml"), []byte{}, 0644)
+		child := filepath.Join(root, "code", "some-repo")
+		os.MkdirAll(child, 0755)
+
+		got, err := FindWorkspaceDir(child)
+
+		if err != nil {
+			t.Fatalf("FindWorkspaceDir returned unexpected error: %v:", err)
+		}
+
+		if got != root {
+			t.Errorf("FindWorkspacesDir = %v, want %v", got, root)
+		}
+	})
+
+	t.Run("returns error when not in workspace", func (t *testing.T) {
+
+		dir := t.TempDir() // assume no workspace.toml anywhere above
+
+		_, err := FindWorkspaceDir(dir)
+
+		if !errors.Is(err, ErrNotInWorkspace) {
+			t.Errorf("expected ErrNotInWorkspace, got: %v:", err)
 		}
 	})
 }
