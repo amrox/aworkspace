@@ -77,20 +77,4 @@ type Repo struct {
 	path string
 }
 
-func FindWorkspaceDir(startDir string) (string, error) {
-	dir := startDir
 
-	for {
-		_, err := os.Stat(filepath.Join(dir, "workspace.toml"))
-		if err == nil {
-			return dir, nil
-		} else if !os.IsNotExist(err) {
-			return "", err
-		}
-		nextDir := filepath.Dir(dir)
-		if dir == nextDir {
-			return "", ErrNotInWorkspace
-		}
-		dir = nextDir
-	}
-}
