@@ -74,3 +74,45 @@ func CreateWorkspace(name string, config Config) (Workspace, error) {
 	success = true
 	return Workspace{path: wsPath}, nil
 }
+
+func loadWorkspace(wsPath string) (Workspace, error) {
+
+	_, err := os.Stat(wsPath)
+	if err != nil {
+		return Workspace{}, fmt.Errorf("workspace path %q not found: %w", wsPath, err)
+	}
+
+	wsTomlPath := filepath.Join(wsPath, "workspace.toml")
+	_, err = os.Stat(wsTomlPath)
+	if err != nil {
+		 return Workspace{}, fmt.Errorf("%q is not a workspace (missing workspace.toml): %w", wsPath, err)
+	}
+
+	return Workspace{path: wsPath}, nil
+}
+
+func ListWorkspaces(config Config) ([]Workspace, error) {
+
+	entries, err := os.ReadDir(config.WorkspacesDir)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	var workspaces []Workspace
+
+	for _, e := range entries {
+		if e.IsDir() {
+			wsPath := filepath.Join(config.WorkspacesDir, e.Name())
+			ws, err := loadWorkspace(wsPath)
+			if err != nil {
+				// TODO: logging
+			} else {
+				workspaces = append(workspaces, ws)
+			}
+		}
+	}
+	return workspaces, nil
+}
