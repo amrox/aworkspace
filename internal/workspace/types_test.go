@@ -124,3 +124,28 @@ func TestLoadConfigFromBytes(t *testing.T) {
 		}
 	})
 }
+
+
+func TestWorkspaceName(t *testing.T) {
+
+	t.Run("Workspace.Name() happy path", func(t *testing.T) {
+		ws := Workspace{path: "/home/you/Workspaces/hi" }
+
+		expected := "hi"
+		got := ws.Name()
+		if  got != expected {
+			t.Errorf("Workspace.Name() expected '%v' got '%v'", expected, got)
+		}
+	})
+
+	t.Run("Workspace.Name() empty", func(t *testing.T) {
+		ws := Workspace{}
+
+		expected := ""
+		got := ws.Name()
+		if  got != expected {
+			t.Errorf("Workspace.Name() expected '%v' got '%v'", expected, got)
+		}
+	})
+
+}

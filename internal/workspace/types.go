@@ -71,6 +71,14 @@ func LoadOrDefaultConfig(path string) (Config, error) {
 
 type Workspace struct {
 	path string
+
+}
+
+func (ws Workspace) Name() string {
+	if ws.path ==  "" {
+		return ""
+	}
+	return filepath.Base(ws.path)
 }
 
 type Repo struct {

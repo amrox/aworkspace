@@ -40,7 +40,7 @@ func TestFindWorkspaceDir(t *testing.T) {
 		}
 	})
 
-	t.Run("returns error when not in workspace", func (t *testing.T) {
+	t.Run("returns error when not in workspace", func(t *testing.T) {
 
 		dir := t.TempDir() // assume no workspace.toml anywhere above
 
@@ -68,8 +68,18 @@ func TestCreateWorkspace(t *testing.T) {
 		}
 
 		expectedPath := filepath.Join(config.WorkspacesDir, wsName)
-		if ws.path !=  expectedPath {
+		if ws.path != expectedPath {
 			t.Errorf("expected ws.path %v, got: %v:", ws.path, expectedPath)
+		}
+
+		expectedFiles := []string{"workspace.toml", "CLAUDE.md", "WORKSPACE.md"}
+
+		for _, f := range expectedFiles {
+			path := filepath.Join(ws.path, f)
+			_, err = os.Stat(path)
+			if err != nil {
+				t.Errorf("CreateWorkspace %v not found: %v", f, err)
+			}
 		}
 	})
 
@@ -82,7 +92,7 @@ func TestCreateWorkspace(t *testing.T) {
 		config.WorkspacesDir = dir
 
 		err := os.MkdirAll(filepath.Join(dir, wsName), 0777)
-		if (err != nil) {
+		if err != nil {
 			t.Fatalf("os.MkdirAll returned unexpected error: %v:", err)
 		}
 
