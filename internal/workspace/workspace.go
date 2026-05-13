@@ -72,10 +72,10 @@ func CreateWorkspace(name string, config Config) (Workspace, error) {
 	}
 
 	success = true
-	return Workspace{path: wsPath}, nil
+	return Workspace{Path: wsPath}, nil
 }
 
-func loadWorkspace(wsPath string) (Workspace, error) {
+func LoadWorkspace(wsPath string) (Workspace, error) {
 
 	_, err := os.Stat(wsPath)
 	if err != nil {
@@ -88,7 +88,7 @@ func loadWorkspace(wsPath string) (Workspace, error) {
 		 return Workspace{}, fmt.Errorf("%q is not a workspace (missing workspace.toml): %w", wsPath, err)
 	}
 
-	return Workspace{path: wsPath}, nil
+	return Workspace{Path: wsPath}, nil
 }
 
 func ListWorkspaces(config Config) ([]Workspace, error) {
@@ -105,8 +105,8 @@ func ListWorkspaces(config Config) ([]Workspace, error) {
 
 	for _, e := range entries {
 		if e.IsDir() {
-			wsPath := filepath.Join(config.WorkspacesDir, e.Name())
-			ws, err := loadWorkspace(wsPath)
+		wsPath := filepath.Join(config.WorkspacesDir, e.Name())
+			ws, err := LoadWorkspace(wsPath)
 			if err != nil {
 				// TODO: logging
 			} else {
@@ -115,4 +115,37 @@ func ListWorkspaces(config Config) ([]Workspace, error) {
 		}
 	}
 	return workspaces, nil
+}
+
+func DefaultBranchName(workspace Workspace, config Config) string {
+	return config.BranchPrefix + workspace.Name()
+}
+
+func AddRepo(ws Workspace, repoURL string, branch string, config Config) error {
+
+	repo, err := parseRepoURL(repoURL)
+	if err != nil {
+		return err
+	}
+
+	bareRepoPath, err := cloneBareRepo(repoURL, config)
+	if err != nil {
+		return err
+	}
+
+	if branch == "" {
+		branch = DefaultBranchName(ws, config)
+	}
+
+	// TODO: handle conflicting worktree paths
+	workTreeDest := filepath.Join(ws.Path, config.WorktreeSubdir, repo.Name)
+
+	err = addWorktree(bareRepoPath, workTreeDest, branch)
+	if err != nil {
+		return err
+	}
+
+	// TODO: add to workspace.toml
+
+	return nil
 }

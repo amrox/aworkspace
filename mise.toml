@@ -1,8 +1,13 @@
 [tools]
 go = "latest"
 
+[tasks.build]
+run = "go build ."
+
 [tasks.test]
 run = "go test ./..."
+description = "Run unit tests"
 
-[tasks.build]
-run = "go build ./..."
+[tasks."test:integration"]
+run = "go test -tags integration ./..."
+description = "Run all tests including integration"

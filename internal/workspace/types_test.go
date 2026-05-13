@@ -129,7 +129,7 @@ func TestLoadConfigFromBytes(t *testing.T) {
 func TestWorkspaceName(t *testing.T) {
 
 	t.Run("Workspace.Name() happy path", func(t *testing.T) {
-		ws := Workspace{path: "/home/you/Workspaces/hi" }
+		ws := Workspace{Path: "/home/you/Workspaces/hi" }
 
 		expected := "hi"
 		got := ws.Name()

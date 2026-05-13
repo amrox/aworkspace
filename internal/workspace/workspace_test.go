@@ -68,14 +68,14 @@ func TestCreateWorkspace(t *testing.T) {
 		}
 
 		expectedPath := filepath.Join(config.WorkspacesDir, wsName)
-		if ws.path != expectedPath {
-			t.Errorf("expected ws.path %v, got: %v:", ws.path, expectedPath)
+		if ws.Path != expectedPath {
+			t.Errorf("expected ws.path %v, got: %v:", ws.Path, expectedPath)
 		}
 
 		expectedFiles := []string{"workspace.toml", "CLAUDE.md", "WORKSPACE.md"}
 
 		for _, f := range expectedFiles {
-			path := filepath.Join(ws.path, f)
+			path := filepath.Join(ws.Path, f)
 			_, err = os.Stat(path)
 			if err != nil {
 				t.Errorf("CreateWorkspace %v not found: %v", f, err)
@@ -116,7 +116,7 @@ func TestLoadWorkspace(t *testing.T) {
 
 		wsPath := filepath.Join(dir, wsName)
 
-		_, err := loadWorkspace(wsPath)
+		_, err := LoadWorkspace(wsPath)
 
 		if err == nil {
 			t.Errorf("expected error when loading workspace at non-exist path %v", wsPath)
@@ -132,7 +132,7 @@ func TestLoadWorkspace(t *testing.T) {
 		wsPath := filepath.Join(dir, wsName)
 		os.MkdirAll(wsPath, 0755)
 
-		_, err := loadWorkspace(wsPath)
+		_, err := LoadWorkspace(wsPath)
 
 		if err == nil {
 			t.Errorf("expected error when loading workspace without workspace.toml at path %v", wsPath)
@@ -148,12 +148,12 @@ func TestLoadWorkspace(t *testing.T) {
 		os.MkdirAll(wsPath, 0755)
 		os.WriteFile(filepath.Join(wsPath, "workspace.toml"), []byte{}, 0644)
 
-		ws, err := loadWorkspace(wsPath)
+		ws, err := LoadWorkspace(wsPath)
 		if err != nil {
 			t.Fatalf("LoadWorkspace returned unexpected error: %v:", err)
 		}
-		if ws.path != wsPath {
-			t.Errorf("expected ws.path = %v, got %v", wsPath, ws.path)
+		if ws.Path != wsPath {
+			t.Errorf("expected ws.path = %v, got %v", wsPath, ws.Path)
 		}
 	})
 
@@ -168,12 +168,12 @@ func TestLoadWorkspace(t *testing.T) {
 			t.Fatalf("CreateWorkspace expected no error, got %v", err)
 		}
 
-		ws2, err := loadWorkspace(ws.path)
+		ws2, err := LoadWorkspace(ws.Path)
 		if err != nil {
 			t.Fatalf("LoadWorkspace expected no error, got %v", err)
 		}
-		if ws.path != ws2.path {
-			t.Errorf("expected workspace paths to be equal, ws.path: %v   ws2.path: %v", ws.path, ws2.path)
+		if ws.Path != ws2.Path {
+			t.Errorf("expected workspace paths to be equal, ws.path: %v   ws2.path: %v", ws.Path, ws2.Path)
 		}
 	})
 }
@@ -234,8 +234,8 @@ func TestListWorkspaces(t *testing.T) {
 		if len(list) != 1 {
 			t.Fatalf("expected 1 workspace entry, got %d", len(list))
 		}
-		if list[0].path != ws1Dir {
-			t.Errorf("expected workspace with path %v , got %v", ws1Dir, list[0].path)
+		if list[0].Path != ws1Dir {
+			t.Errorf("expected workspace with path %v , got %v", ws1Dir, list[0].Path)
 		}
 	})
 }

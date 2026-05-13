@@ -14,6 +14,7 @@ var ErrNotInWorkspace = errors.New("not inside a workspace")
 type Config struct {
 	BaresDir      string `toml:"bares_dir"`
 	WorkspacesDir string `toml:"workspaces_dir"`
+	WorktreeSubdir string `toml:"workspace_worktree_subdir"`
 
 	BranchPrefix string `toml:"branch_prefix"`
 
@@ -38,6 +39,7 @@ func DefaultConfig() Config {
 	return Config{
 		WorkspacesDir: filepath.Join(home, "Workspaces"),
 		BaresDir:      filepath.Join(home, "Repos"),
+		WorktreeSubdir: "code",
 		BranchPrefix:  "ws/",
 	}
 }
@@ -70,19 +72,23 @@ func LoadOrDefaultConfig(path string) (Config, error) {
 }
 
 type Workspace struct {
-	path string
+	Path string
 
 }
 
 func (ws Workspace) Name() string {
-	if ws.path ==  "" {
+	if ws.Path ==  "" {
 		return ""
 	}
-	return filepath.Base(ws.path)
+	return filepath.Base(ws.Path)
 }
 
 type Repo struct {
-	path string
+	Name string
+	Namespace string
+	Host string
+
+	Url string
 }
 
 
