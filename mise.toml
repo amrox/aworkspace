@@ -1,5 +1,6 @@
 [tools]
 go = "latest"
+golangci-lint = "latest"
 
 [tasks.build]
 run = "go build ."
@@ -7,6 +8,10 @@ run = "go build ."
 [tasks.test]
 run = "go test ./..."
 description = "Run unit tests"
+
+[tasks.lint]
+run = "golangci-lint run ./..."
+description = "Run linter"
 
 [tasks."test:integration"]
 run = "go test -tags integration ./..."

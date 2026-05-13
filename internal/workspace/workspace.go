@@ -47,7 +47,7 @@ func CreateWorkspace(name string, config Config) (Workspace, error) {
 	success := false
 	defer func() {
 		if !success {
-			os.RemoveAll(wsPath)
+			_ = os.RemoveAll(wsPath)
 		}
 	}()
 
