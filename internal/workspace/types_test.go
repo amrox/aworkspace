@@ -54,6 +54,53 @@ func TestDefaultConfigPath(t *testing.T) {
 	}
 }
 
+func TestDefaultBaresPath(t *testing.T) {
+	tests := []struct {
+		name           string
+		xdgDataHome    string
+		home           string
+		expectedSuffix string
+	}{
+		{
+			name:           "uses XDG_DATA_HOME when set",
+			xdgDataHome:    "/custom/data",
+			home:           "/home/user",
+			expectedSuffix: "/custom/data/aworkspace/repos",
+		},
+		{
+			name:           "falls back to HOME/.local/share when XDG_DATA_HOME not set",
+			xdgDataHome:     "",
+			home:           "/home/user",
+			expectedSuffix: "/home/user/.local/share/aworkspace/repos",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Save original env vars
+			origXDG := os.Getenv("XDG_DATA_HOME")
+			origHome := os.Getenv("HOME")
+			defer func() {
+				os.Setenv("XDG_DATA_HOME", origXDG)
+				os.Setenv("HOME", origHome)
+			}()
+
+			// Set test env vars
+			if tt.xdgDataHome != "" {
+				os.Setenv("XDG_DATA_HOME", tt.xdgDataHome)
+			} else {
+				os.Unsetenv("XDG_DATA_HOME")
+			}
+			os.Setenv("HOME", tt.home)
+
+			got := DefaultBaresPath()
+			if got != tt.expectedSuffix {
+				t.Errorf("DefaultBaresPath() = %v, want %v", got, tt.expectedSuffix)
+			}
+		})
+	}
+}
+
 func TestDefaultConfig(t *testing.T) {
 	// Save original HOME
 	origHome := os.Getenv("HOME")
@@ -72,7 +119,7 @@ func TestDefaultConfig(t *testing.T) {
 	}
 
 	// Check ReposDir
-	expectedReposDir := filepath.Join(testHome, "Repos")
+	expectedReposDir := DefaultBaresPath()
 	if config.BaresDir != expectedReposDir {
 		t.Errorf("BaresDir = %v, want %v", config.BaresDir, expectedReposDir)
 	}
@@ -147,5 +194,4 @@ func TestWorkspaceName(t *testing.T) {
 			t.Errorf("Workspace.Name() expected '%v' got '%v'", expected, got)
 		}
 	})
-
 }

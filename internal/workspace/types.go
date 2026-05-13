@@ -12,8 +12,8 @@ import (
 var ErrNotInWorkspace = errors.New("not inside a workspace")
 
 type Config struct {
-	BaresDir      string `toml:"bares_dir"`
-	WorkspacesDir string `toml:"workspaces_dir"`
+	BaresDir       string `toml:"bares_dir"`
+	WorkspacesDir  string `toml:"workspaces_dir"`
 	WorktreeSubdir string `toml:"workspace_worktree_subdir"`
 
 	BranchPrefix string `toml:"branch_prefix"`
@@ -24,23 +24,38 @@ type Config struct {
 
 }
 
+func homeDir() string {
+	homeDirVal, err := os.UserHomeDir()
+	if err != nil {
+			panic("could not determine home directory: " + err.Error())
+	}
+	return homeDirVal
+}
+
 func DefaultConfigPath() string {
 	configHome := os.Getenv("XDG_CONFIG_HOME")
 	if configHome == "" {
-		home, _ := os.UserHomeDir()
-		configHome = filepath.Join(home, ".config")
+		configHome = filepath.Join(homeDir(), ".config")
 	}
 	return filepath.Join(configHome, "aworkspace", "config.toml")
 }
 
+func DefaultBaresPath() string {
+	dataHome := os.Getenv("XDG_DATA_HOME")
+	if dataHome == "" {
+		dataHome = filepath.Join(homeDir(), ".local", "share")
+	}
+	return filepath.Join(dataHome, "aworkspace", "repos")
+}
+
 func DefaultConfig() Config {
 	// TODO: should we default to raw values ("~/Workspaces") and canonicalize paths later?
-	home, _ := os.UserHomeDir()
+
 	return Config{
-		WorkspacesDir: filepath.Join(home, "Workspaces"),
-		BaresDir:      filepath.Join(home, "Repos"),
+		WorkspacesDir:  filepath.Join(homeDir(), "Workspaces"),
+		BaresDir:       DefaultBaresPath(),
 		WorktreeSubdir: "code",
-		BranchPrefix:  "ws/",
+		BranchPrefix:   "ws/",
 	}
 }
 
@@ -73,22 +88,19 @@ func LoadOrDefaultConfig(path string) (Config, error) {
 
 type Workspace struct {
 	Path string
-
 }
 
 func (ws Workspace) Name() string {
-	if ws.Path ==  "" {
+	if ws.Path == "" {
 		return ""
 	}
 	return filepath.Base(ws.Path)
 }
 
 type Repo struct {
-	Name string
+	Name      string
 	Namespace string
-	Host string
+	Host      string
 
 	Url string
 }
-
-
