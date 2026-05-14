@@ -57,7 +57,7 @@ func TestAddRepoIntegration(t *testing.T) {
 		ws, config := createTestWorkspace(t, "test-ws")
 
 		remoteRepo := createTestRepo(t)
-		err := AddRepo(ws, remoteRepo, "", config)
+		err := ws.AddRepo(remoteRepo, "", config)
 		if err != nil {
 			t.Fatalf("AddRepo: %v", err)
 		}
@@ -89,7 +89,7 @@ func TestAddRepoIntegration(t *testing.T) {
 			t.Fatalf("cloneBareRepo: %v", err)
 		}
 
-		err = AddRepo(ws, remoteRepo, "", config)
+		err = ws.AddRepo(remoteRepo, "", config)
 		if err != nil {
 			t.Fatalf("AddRepo: %v", err)
 		}
@@ -105,12 +105,12 @@ func TestAddRepoIntegration(t *testing.T) {
 		remoteRepo := createTestRepo(t)
 
 		// create a branch matching our ws branch
-		err := exec.Command("git", "-C", remoteRepo, "branch", DefaultBranchName(ws, config)).Run()
+		err := exec.Command("git", "-C", remoteRepo, "branch", defaultBranchName(ws, config)).Run()
 		if err != nil {
 			t.Fatalf("git remote branch creation failed: %v", err)
 		}
 
-		err = AddRepo(ws, remoteRepo, "", config)
+		err = ws.AddRepo(remoteRepo, "", config)
 		if err != nil {
 			t.Fatalf("AddRepo: %v", err)
 		}
@@ -131,12 +131,12 @@ func TestAddRepoIntegration(t *testing.T) {
 		localBare, err := cloneBareRepo(remoteRepo, config)
 
 		// create a branch matching our ws branch
-		err = exec.Command("git", "-C", localBare, "branch", DefaultBranchName(ws, config)).Run()
+		err = exec.Command("git", "-C", localBare, "branch", defaultBranchName(ws, config)).Run()
 		if err != nil {
 			t.Fatalf("git local branch creation failed: %v", err)
 		}
 
-		err = AddRepo(ws, remoteRepo, "", config)
+		err = ws.AddRepo(remoteRepo, "", config)
 		if err != nil {
 			t.Fatalf("AddRepo: %v", err)
 		}
@@ -151,7 +151,7 @@ func TestAddRepoIntegration(t *testing.T) {
 
 		remoteRepo := t.TempDir()
 
-		err := AddRepo(ws, remoteRepo, "", config)
+		err := ws.AddRepo(remoteRepo, "", config)
 		if err == nil {
 			t.Fatalf("AddRepo: expected error, got <nil>")
 		}
@@ -168,12 +168,12 @@ func TestAddRepoIntegration(t *testing.T) {
 
 		// create a worktree with branch matching our ws branch
 		worktreeDest := t.TempDir()
-		err = exec.Command("git", "-C", localBare, "worktree", "add", worktreeDest, "-B", DefaultBranchName(ws, config)).Run()
+		err = exec.Command("git", "-C", localBare, "worktree", "add", worktreeDest, "-B", defaultBranchName(ws, config)).Run()
 		if err != nil {
 			t.Fatalf("git worktree creation failed: %v", err)
 		}
 
-		err = AddRepo(ws, remoteRepo, "", config)
+		err = ws.AddRepo(remoteRepo, "", config)
 		if err == nil {
 			t.Fatalf("AddRepo: expected error, got <nil>")
 		}

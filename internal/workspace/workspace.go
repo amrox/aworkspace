@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/pelletier/go-toml/v2"
 )
 
 //go:embed templates/CLAUDE.md
@@ -12,6 +14,18 @@ var claudeMdTemplate string
 
 //go:embed templates/WORKSPACE.md
 var workspaceMdTemplate string
+
+type RepoConfig struct {
+	URL string `toml:"url"`
+}
+
+type WorkspaceMetadata struct {
+
+	Config struct {
+		WorktreeSubdir string `toml:"worktree_subdir"`
+	} `toml:"config"`
+	Repos map[string]RepoConfig `toml:"repos"`
+}
 
 func FindWorkspaceDir(startDir string) (string, error) {
 	dir := startDir
@@ -28,6 +42,42 @@ func FindWorkspaceDir(startDir string) (string, error) {
 			return "", ErrNotInWorkspace
 		}
 		dir = nextDir
+	}
+}
+
+func (w *Workspace) writeMetadata() error {
+	bytes, err := toml.Marshal(w.Metadata)
+	if err != nil {
+		return err
+	}
+
+	err = os.WriteFile(filepath.Join(w.Path, "workspace.toml"), bytes, 0666)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (w *Workspace) loadMetadata() error {
+
+	bytes, err := os.ReadFile(filepath.Join(w.Path, "workspace.toml"))
+	if err != nil {
+		return err
+	}
+
+	err = toml.Unmarshal(bytes, &w.Metadata)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func NewWorkspace(path string) Workspace {
+	return Workspace{
+		Path: path,
+		Metadata: WorkspaceMetadata{
+			Repos: make(map[string]RepoConfig),
+		},
 	}
 }
 
@@ -56,11 +106,6 @@ func CreateWorkspace(name string, config Config) (Workspace, error) {
 		return Workspace{}, err
 	}
 
-	err = os.WriteFile(filepath.Join(wsPath, "workspace.toml"), []byte{}, 0666)
-	if err != nil {
-		return Workspace{}, err
-	}
-
 	err = os.WriteFile(filepath.Join(wsPath, "CLAUDE.md"), []byte(claudeMdTemplate), 0666)
 	if err != nil {
 		return Workspace{}, err
@@ -71,8 +116,15 @@ func CreateWorkspace(name string, config Config) (Workspace, error) {
 		return Workspace{}, err
 	}
 
+	ws := NewWorkspace(wsPath)
+	ws.Metadata.Config.WorktreeSubdir = config.WorktreeSubdir
+	err = ws.writeMetadata()
+	if err != nil {
+		return Workspace{}, err
+	}
+
 	success = true
-	return Workspace{Path: wsPath}, nil
+	return ws, nil
 }
 
 func LoadWorkspace(wsPath string) (Workspace, error) {
@@ -82,13 +134,13 @@ func LoadWorkspace(wsPath string) (Workspace, error) {
 		return Workspace{}, fmt.Errorf("workspace path %q not found: %w", wsPath, err)
 	}
 
-	wsTomlPath := filepath.Join(wsPath, "workspace.toml")
-	_, err = os.Stat(wsTomlPath)
+	ws := NewWorkspace(wsPath)
+	err = ws.loadMetadata()
 	if err != nil {
-		 return Workspace{}, fmt.Errorf("%q is not a workspace (missing workspace.toml): %w", wsPath, err)
+		 return Workspace{}, err
 	}
 
-	return Workspace{Path: wsPath}, nil
+	return ws, nil
 }
 
 func ListWorkspaces(config Config) ([]Workspace, error) {
@@ -117,11 +169,11 @@ func ListWorkspaces(config Config) ([]Workspace, error) {
 	return workspaces, nil
 }
 
-func DefaultBranchName(workspace Workspace, config Config) string {
+func defaultBranchName(workspace Workspace, config Config) string {
 	return config.BranchPrefix + workspace.Name()
 }
 
-func AddRepo(ws Workspace, repoURL string, branch string, config Config) error {
+func (ws *Workspace) AddRepo(repoURL string, branch string, config Config) error {
 
 	repo, err := parseRepoURL(repoURL)
 	if err != nil {
@@ -134,18 +186,29 @@ func AddRepo(ws Workspace, repoURL string, branch string, config Config) error {
 	}
 
 	if branch == "" {
-		branch = DefaultBranchName(ws, config)
+		branch = defaultBranchName(*ws, config)
 	}
 
 	// TODO: handle conflicting worktree paths
 	workTreeDest := filepath.Join(ws.Path, config.WorktreeSubdir, repo.Name)
+	success := false
+	defer func() {
+		if !success {
+			_ = os.RemoveAll(workTreeDest)
+		}
+	}()
 
 	err = addWorktree(bareRepoPath, workTreeDest, branch)
 	if err != nil {
 		return err
 	}
 
-	// TODO: add to workspace.toml
+	ws.Metadata.Repos[repo.Name] = RepoConfig{URL: repo.Url}
+	err = ws.writeMetadata()
+	if err != nil {
+		return err
+	}
 
+	success = true
 	return nil
 }

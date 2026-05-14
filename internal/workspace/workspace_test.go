@@ -102,7 +102,7 @@ func TestCreateWorkspace(t *testing.T) {
 			t.Errorf("expected os.ErrExists, got: %v:", err)
 		}
 
-		if ws != (Workspace{}) {
+		if ws.Path != "" {
 			t.Errorf("expected empty Workspace struct got: %v:", ws)
 		}
 	})
@@ -161,11 +161,15 @@ func TestLoadWorkspace(t *testing.T) {
 
 		tmpDir := t.TempDir()
 		parentDir := filepath.Join(tmpDir, "Workspaces")
-		config := Config{WorkspacesDir: parentDir}
+		config := DefaultConfig()
+		config.WorkspacesDir = parentDir
 
 		ws, err := CreateWorkspace("ws1", config)
 		if err != nil {
 			t.Fatalf("CreateWorkspace expected no error, got %v", err)
+		}
+		if ws.Metadata.Config.WorktreeSubdir != config.WorktreeSubdir {
+			t.Errorf("WorktreeSubdir expected %v, got %v", config.WorktreeSubdir, ws.Metadata.Config.WorktreeSubdir)
 		}
 
 		ws2, err := LoadWorkspace(ws.Path)
@@ -174,6 +178,9 @@ func TestLoadWorkspace(t *testing.T) {
 		}
 		if ws.Path != ws2.Path {
 			t.Errorf("expected workspace paths to be equal, ws.path: %v   ws2.path: %v", ws.Path, ws2.Path)
+		}
+		if ws.Metadata.Config.WorktreeSubdir != ws2.Metadata.Config.WorktreeSubdir {
+			t.Errorf("expected worktreeSubdir config to be equal, ws..WorktreeSubdir: %v   ws2..WorktreeSubdir: %v", ws.Metadata.Config.WorktreeSubdir, ws2.Metadata.Config.WorktreeSubdir)
 		}
 	})
 }
