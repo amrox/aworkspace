@@ -38,7 +38,7 @@ var addRepoCmd = &cobra.Command{
 			return err
 		}
 
-		err = workspace.AddRepo(ws, repoURL, "", config)
+		err = ws.AddRepo(repoURL, "", config)
 		if err != nil {
 			return err
 		}

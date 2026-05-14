@@ -88,6 +88,7 @@ func LoadOrDefaultConfig(path string) (Config, error) {
 
 type Workspace struct {
 	Path string
+	Metadata WorkspaceMetadata
 }
 
 func (ws Workspace) Name() string {
