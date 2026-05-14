@@ -27,7 +27,7 @@ var listCmd = &cobra.Command{
 		}
 
 		for _, ws := range workspaces {
-			fmt.Println(ws.Name())
+			fmt.Fprintln(cmd.OutOrStdout(), ws.Name())
 		}
 
 		return nil

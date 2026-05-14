@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 )
@@ -28,4 +29,16 @@ func Execute() {
 func init() {
 	rootCmd.SilenceUsage = true
 	rootCmd.SilenceErrors = true
+}
+
+func addDirFlag(cmd *cobra.Command) {
+	cmd.Flags().StringP("dir", "C", "", "run as if started in `path`")
+}
+
+func getStartDir(cmd *cobra.Command) (string, error) {
+	dir, _ := cmd.Flags().GetString("dir")
+	if dir != "" {
+		return filepath.Abs(dir)
+	}
+	return os.Getwd()
 }

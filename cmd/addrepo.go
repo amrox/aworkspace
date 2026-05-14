@@ -1,13 +1,12 @@
 package cmd
 
 import (
-	"os"
-
 	"github.com/amrox/aworkspace/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
 func init() {
+	addDirFlag(addRepoCmd)
 	rootCmd.AddCommand(addRepoCmd)
 }
 
@@ -18,17 +17,17 @@ var addRepoCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		repoURL := args[0]
 
+		startDir, err := getStartDir(cmd)
+		if err != nil {
+			return err
+		}
+
 		config, err := workspace.LoadOrDefaultConfig("")
 		if err != nil {
 			return err
 		}
 
-		cwd, err := os.Getwd()
-		if err != nil {
-			return err
-		}
-
-		wsDir, err := workspace.FindWorkspaceDir(cwd)
+		wsDir, err := workspace.FindWorkspaceDir(startDir)
 		if err != nil {
 			return err
 		}

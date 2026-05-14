@@ -28,7 +28,7 @@ var newCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		fmt.Println("Created workspace:", ws.Name())
+		fmt.Fprintln(cmd.OutOrStdout(), "Created workspace:", ws.Name())
 		return nil
 	},
 }
