@@ -37,21 +37,22 @@ Goal: Get the basic workspace management working. Create, list, and manage works
 
 ### Must Have
 
-- [ ] **Core data types** — `Workspace`, `Repo`, `Config` structs in `internal/workspace/`
-- [ ] **Config loading** — Read/write `~/.config/aworkspace/config.toml` with defaults
-- [ ] **Workspace discovery** — Find workspace by walking up from cwd to locate `workspace.toml`
-- [ ] **`aworkspace new <name>`** — Create workspace directory with `workspace.toml`, `WORKSPACE.md`, and `CLAUDE.md`
+- [x] **Core data types** — `Workspace`, `Repo`, `Config` structs in `internal/workspace/`
+- [x] **Config loading** — Read/write `~/.config/aworkspace/config.toml` with defaults
+- [x] **Workspace discovery** — Find workspace by walking up from cwd to locate `workspace.toml`
+- [x] **`aworkspace new <name>`** — Create workspace directory with `workspace.toml`, `WORKSPACE.md`, and `CLAUDE.md`
   - `CLAUDE.md` includes default workspace isolation rules for agents
   - Makes agents immediately understand that repos are independent projects
-- [ ] **`aworkspace list`** — List all workspaces (basic: name only)
-- [ ] **`aworkspace show`** — Display current workspace info (repos, branches, status)
-- [ ] **`aworkspace add-repo <url> [branch]`** — Clone bare repo + create worktree
+- [x] **`aworkspace list`** — List all workspaces (basic: name only)
+- [x] **`aworkspace show`** — Display current workspace info (repos, branches, status)
+- [x] **`aworkspace add-repo <url> [branch]`** — Clone bare repo + create worktree
   - Handle bare clone creation
   - Create worktree with branch
   - Update `workspace.toml` with repo metadata
   - Support branch naming with configurable prefix
   - **Support multiple different repos per workspace**
-- [ ] **Basic tests** — Unit tests for workspace discovery, config loading, path handling
+- [x] **`-C <path>` flag** — Override working directory for commands that depend on cwd (`show`, `add-repo`)
+- [x] **Basic tests** — Unit tests for workspace discovery, config loading, path handling
 
 ### Nice to Have
 

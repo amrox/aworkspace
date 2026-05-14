@@ -2,13 +2,13 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/amrox/aworkspace/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
 func init() {
+	addDirFlag(showCmd)
 	rootCmd.AddCommand(showCmd)
 }
 
@@ -17,12 +17,12 @@ var showCmd = &cobra.Command{
 	Short: "Show current workspace info",
 	RunE: func(cmd *cobra.Command, args []string) error {
 
-		cwd, err := os.Getwd()
+		startDir, err := getStartDir(cmd)
 		if err != nil {
 			return err
 		}
 
-		wsDir, err := workspace.FindWorkspaceDir(cwd)
+		wsDir, err := workspace.FindWorkspaceDir(startDir)
 		if err != nil {
 			return err
 		}
@@ -32,8 +32,13 @@ var showCmd = &cobra.Command{
 			return err
 		}
 
-		fmt.Printf("Workspace Name: %v\n", ws.Name())
-		fmt.Printf("Workspace Path: %v\n", ws.Path)
+		fmt.Fprintf(cmd.OutOrStdout(), "Workspace Name: %v\n", ws.Name())
+		fmt.Fprintf(cmd.OutOrStdout(), "Workspace Path: %v\n", ws.Path)
+		fmt.Fprintf(cmd.OutOrStdout(), "Repos:\n")
+		for name, rc := range(ws.Metadata.Repos) {
+			// TODO: sort keys
+			fmt.Fprintf(cmd.OutOrStdout(), "- %s: %s\n", name, rc.URL)
+		}
 
 		return nil
 	},
