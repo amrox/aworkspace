@@ -16,8 +16,7 @@ a single initiative. Each worktree is a subdirectory which may have its own
   between them. No repo should import, symlink, or refer to paths in another.
 - These are git worktrees, not standalone clones. Do not run `git init`,
   `git clone`, or re-clone repos that are already here.
-- Commit and push each repo independently. Never combine changes from
-  multiple repos into a single commit.
+- Commit and push each repo independently.
 - Do not clone, fetch, or push to repos not already checked out here.
 - This workspace is temporary scaffolding for development — it will not be
   committed or shared as a unit.
