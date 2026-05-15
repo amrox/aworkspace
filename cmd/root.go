@@ -5,8 +5,11 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/amrox/aworkspace/internal/workspace"
 	"github.com/spf13/cobra"
 )
+
+var cfg *workspace.Config
 
 var rootCmd = &cobra.Command{
 	Use:   "aworkspace",
@@ -14,8 +17,16 @@ var rootCmd = &cobra.Command{
 	Long: `yada
                 yada
                 yada`,
-	Run: func(cmd *cobra.Command, args []string) {
-		// Do Stuff Here
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		if cfg != nil {
+			return nil
+		}
+		c, err := workspace.LoadOrDefaultConfig("")
+		if err != nil {
+			return err
+		}
+		cfg = &c
+		return nil
 	},
 }
 

@@ -22,11 +22,6 @@ var addRepoCmd = &cobra.Command{
 			return err
 		}
 
-		config, err := workspace.LoadOrDefaultConfig("")
-		if err != nil {
-			return err
-		}
-
 		wsDir, err := workspace.FindWorkspaceDir(startDir)
 		if err != nil {
 			return err
@@ -37,7 +32,7 @@ var addRepoCmd = &cobra.Command{
 			return err
 		}
 
-		err = ws.AddRepo(repoURL, "", config)
+		err = ws.AddRepo(repoURL, "", *cfg)
 		if err != nil {
 			return err
 		}
