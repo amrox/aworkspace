@@ -10,6 +10,20 @@
 
 **Branch collision handling:** If a `ws/<name>` branch already exists or is already checked out, `add-repo` will fail with a clear error. No auto-suffixing or magic renaming. This should be rare since `ws/` is aworkspace's namespace. If it happens, it usually means a workspace was removed without cleanup (which `doctor` would flag).
 
+**Base branch tracking:** Each repo in a workspace can specify a `base_branch` — the upstream branch the workspace checkout is based on. Stored in `workspace.toml` per-repo (not derived from git tracking):
+
+```toml
+[repos.my-service]
+url = "git@github.com:org/my-service.git"
+base_branch = "main"
+```
+
+- `add-repo` still creates `ws/<workspace-name>` locally, but starts it from `origin/<base_branch>`: `git worktree add <dest> -B ws/foo origin/main`
+- If omitted at add-time, defaults to the remote's HEAD (the repo's default branch) and is stored explicitly so the metadata is self-describing
+- `update` (0.2) will fetch and rebase/merge from `origin/<base_branch>`
+- Named `base_branch` (not `tracking_branch`) to avoid confusion with git's own upstream tracking concept
+- Useful for reference repos where you want to pin to `main` even if the repo defaults to `dev`
+
 **Open question (0.1 decision required):** Workspace context file naming. Options:
 - `WORKSPACE.md` — Avoids collision with repo READMEs, clear purpose. Current leaning.
 - `README.md` — More conventional, but conflicts when repos have their own READMEs in `code/`
@@ -81,6 +95,7 @@ Goal: Get the basic workspace management working. Create, list, and manage works
 - [ ] Bookmarks for common git hosts
 - [ ] `--from` flag for cloning workspaces
 - [ ] **Configurable `CLAUDE.md` generation** — Config option to disable auto-creation of `CLAUDE.md`
+- [ ] **Verbosity levels** — Default (friendly short output), `--quiet` (silent), `--verbose` (include git command output)
 - [ ] **Workspace templates** — User-defined templates for `new` command (scaffolding, standard files, custom CLAUDE.md)
 
 ## Milestone 0.3 - Quality of Life

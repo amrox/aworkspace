@@ -16,12 +16,7 @@ var listCmd = &cobra.Command{
 	Short: "List workspaces",
 	RunE: func(cmd *cobra.Command, args []string) error {
 
-		config, err := workspace.LoadOrDefaultConfig("")
-		if err != nil {
-			return err
-		}
-
-		workspaces, err := workspace.ListWorkspaces(config)
+		workspaces, err := workspace.ListWorkspaces(*cfg)
 		if err != nil {
 			return err
 		}

@@ -19,12 +19,7 @@ var newCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
 
-		config, err := workspace.LoadOrDefaultConfig("")
-		if err != nil {
-			return err
-		}
-
-		ws, err := workspace.CreateWorkspace(name, config)
+		ws, err := workspace.CreateWorkspace(name, *cfg)
 		if err != nil {
 			return err
 		}
