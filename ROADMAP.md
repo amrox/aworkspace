@@ -70,7 +70,9 @@ Goal: Get the basic workspace management working. Create, list, and manage works
 
 ### Nice to Have
 
-- [ ] **`aworkspace cd <name>`** — Output path for shell integration
+- [x] **`aworkspace cd <name>`** — Output path for shell integration
+- [x] **`aworkspace init <shell>`** — Shell integration setup (emits shell wrapper for `cd`)
+- [ ] **`aworkspace init` auto-detect** — Default to auto-detecting shell (from `$SHELL` or parent process), keep explicit arg as optional override
 - [ ] **`aworkspace rm [workspace]`** — Remove workspace (with safety checks)
 - [ ] **Better error messages** — User-friendly errors with suggestions
 

@@ -13,18 +13,18 @@ Working across multiple repositories on a single feature or initiative is cumber
 aworkspace uses **git worktrees** to create isolated working directories for each workspace. All repos are stored as bare clones in a central location, and each workspace gets its own worktrees with dedicated branches.
 
 ```
-~/Repos/                        # Bare clones (shared)
-  repo-a.git
-  repo-b.git
+~/.local/share/aworkspace/repos/   # Bare clones (shared)
+  github.com/user/repo-a/
+  github.com/user/repo-b/
 
-~/Workspaces/                   # Workspaces
+~/Workspaces/                      # Workspaces
   my-feature/
-    workspace.toml              # Workspace config
-    WORKSPACE.md                # Goals, context, notes
-    CLAUDE.md                   # Agent instructions
+    workspace.toml                 # Workspace config
+    WORKSPACE.md                   # Goals, context, notes
+    CLAUDE.md                      # Agent instructions
     code/
-      repo-a/                   # Worktree (branch: ws/my-feature)
-      repo-b/                   # Worktree (branch: ws/my-feature)
+      repo-a/                      # Worktree (branch: ws/my-feature)
+      repo-b/                      # Worktree (branch: ws/my-feature)
 ```
 
 ## Installation
@@ -49,17 +49,14 @@ aworkspace new my-feature
 
 # Add repos (creates bare clones and worktrees automatically)
 cd ~/Workspaces/my-feature
-aworkspace add-repo github.com/user/repo-a
-aworkspace add-repo github.com/user/repo-b my-custom-branch
+aworkspace add-repo git@github.com:user/repo-a.git
+aworkspace add-repo git@github.com:user/repo-b.git
 
 # List all workspaces
 aworkspace list
 
 # Show details about current workspace
 aworkspace show
-
-# Check your environment
-aworkspace doctor
 ```
 
 ## Commands
@@ -68,99 +65,78 @@ aworkspace doctor
 
 Create a new workspace. Creates the directory structure and initializes `workspace.toml`, `WORKSPACE.md`, and `CLAUDE.md`.
 
-**Options:**
-- `--from <workspace>` — Clone an existing workspace's repo list with fresh branches
-
 ### `aworkspace list`
 
-List all workspaces with their status.
-
-**Options:**
-- `-l, --long` — Show detailed info (repo count, branches, dirty state)
+List all workspaces (one name per line).
 
 ### `aworkspace show`
 
-Show details about a workspace (repos, branches, status). Infers workspace from current directory.
+Show details about a workspace (repos and their URLs). Infers workspace from current directory.
 
 **Options:**
-- `-p, --workspace <name>` — Specify workspace explicitly
 
-### `aworkspace add-repo <url-or-bookmark> [branch]`
+- `-C, --dir <path>` — Run as if started in this directory
 
-Add a repository to the current workspace. Creates a bare clone (if needed) and a worktree.
+### `aworkspace add-repo <url>`
+
+Add a repository to the current workspace. Creates a bare clone (if needed) and a worktree with a `ws/<workspace-name>` branch.
 
 **Examples:**
 ```bash
-# Full URL
 aworkspace add-repo git@github.com:user/repo.git
-
-# Using a bookmark (see Configuration)
-aworkspace add-repo my-tool
-aworkspace add-repo work:gitlab-runners
+aworkspace add-repo https://github.com/user/repo.git
 ```
 
 **Options:**
-- `-p, --workspace <name>` — Add to a specific workspace
 
-### `aworkspace cd <workspace>` (alias: `switch`)
+- `-C, --dir <path>` — Run as if started in this directory
 
-Change to a workspace directory. Outputs the path for shell integration.
+### `aworkspace init <shell>`
 
-To enable `cd` functionality, add to your shell profile:
+Output shell integration code. Add to your shell profile to enable the `cd` subcommand:
 
 ```bash
 # For bash/zsh
-eval "$(aworkspace cd --setup)"
-
-# Or manually:
-aw() { cd "$(aworkspace cd "$@")"; }
+eval "$(aworkspace init zsh)"
 ```
 
-Then use:
+This creates a shell wrapper so that `aworkspace cd` actually changes your directory.
+
+### `aworkspace cd <workspace>` (alias: `switch`)
+
+Change to a workspace directory. Requires shell integration via `aworkspace init`.
+
 ```bash
-aw my-feature    # cd to ~/Workspaces/my-feature
+aworkspace cd my-feature    # cd to ~/Workspaces/my-feature
 ```
 
-### `aworkspace rm [workspace]`
+### PLANNED: `aworkspace new --from <workspace>`
+
+Clone an existing workspace's repo list with fresh branches.
+
+### PLANNED: `aworkspace list -l`
+
+Detailed list format (repo count, branches, dirty state).
+
+### PLANNED: `aworkspace rm [workspace]`
 
 Remove a workspace. Removes worktrees and deletes the workspace directory. Warns if there are uncommitted changes or unpushed branches.
 
-If no workspace is specified, uses the current directory.
+### PLANNED: `aworkspace prune`
 
-### `aworkspace prune`
+Find and remove bare repos that aren't referenced by any workspace.
 
-Find and remove bare repos that aren't referenced by any workspace. Shows what will be deleted and prompts for confirmation.
+### PLANNED: `aworkspace update`
 
-### `aworkspace update`
+Fetch and rebase workspace branches onto their base branch. Skips repos with uncommitted changes.
 
-Update all repos in the current workspace. For each worktree:
-1. Fetches latest from origin
-2. If the workspace branch is clean, rebases onto the configured base branch (default: `main`)
-3. Skips repos with uncommitted changes (reports them)
+### PLANNED: `aworkspace reset`
 
-Safe by default — never discards uncommitted work.
+Reset workspace to a clean state. Skips dirty repos unless `--force` is used.
 
-**Options:**
-- `--no-rebase` — Fetch only, don't rebase
+### PLANNED: `aworkspace doctor`
 
-### `aworkspace reset`
-
-Reset the current workspace to a clean state. For each worktree:
-1. Checks for uncommitted changes
-2. If clean: switches to workspace branch and fetches/resets to match remote
-3. If dirty: skips and reports (use `--force` to discard changes)
-
-Use this to get back to a known-good state, especially after experimental changes.
-
-**Options:**
-- `--force` — Discard uncommitted changes without prompting (destructive)
-
-### `aworkspace doctor`
-
-Check your environment for common issues:
-- Git configuration and version
-- Stale worktrees
-- Workspace/config file validity
+Check your environment for common issues (git config, stale worktrees, config validity).
 
 ## Configuration
 
@@ -168,18 +144,19 @@ Config file: `~/.config/aworkspace/config.toml`
 
 ```toml
 workspaces_dir = "~/Workspaces"
-bares_dir = "~/Repos"
+bares_dir = "~/.local/share/aworkspace/repos"
+workspace_worktree_subdir = "code"
 branch_prefix = "ws/"
-init_submodules = false
 ```
 
 **Options:**
-- `workspaces_dir` — Where workspaces are created (default: `~/Workspaces`)
-- `bares_dir` — Where bare clones are stored (default: `~/Repos`)
-- `branch_prefix` — Prefix for auto-generated workspace branches (default: `"ws/"`)
-- `init_submodules` — Whether to initialize submodules in worktrees (default: `false`)
 
-### Bookmarks
+- `workspaces_dir` — Where workspaces are created (default: `~/Workspaces`)
+- `bares_dir` — Where bare clones are stored (default: `~/.local/share/aworkspace/repos`)
+- `workspace_worktree_subdir` — Subdirectory within workspace for worktrees (default: `"code"`)
+- `branch_prefix` — Prefix for auto-generated workspace branches (default: `"ws/"`)
+
+### PLANNED: Bookmarks
 
 Bookmarks file: `~/.config/aworkspace/bookmarks.toml`
 
@@ -218,33 +195,18 @@ This is useful for:
 - **Tooling integration** — CI/scripts can identify workspace branches by prefix
 - **Team conventions** — matching existing naming schemes
 
-When adding a repo, you can override the branch name:
-
-```bash
-aworkspace add-repo my-repo custom-branch-name
-```
-
 ## Workspace Structure
 
 Each workspace contains:
 
 **`workspace.toml`** — Structured config
 ```toml
-name = "my-feature"
-created = "2026-03-31"
-status = "active"
+[config]
+worktree_subdir = "code"
 
-[[repos]]
-name = "repo-a"
-url = "git@github.com:user/repo-a.git"
-branch = "my-feature"
-bare = "~/Repos/repo-a.git"
-
-[[repos]]
-name = "repo-b"
-url = "git@github.com:user/repo-b.git"
-branch = "my-feature"
-bare = "~/Repos/repo-b.git"
+[repos]
+repo-a = { url = "git@github.com:user/repo-a.git" }
+repo-b = { url = "git@github.com:user/repo-b.git" }
 ```
 
 **`WORKSPACE.md`** — Human-readable context, goals, notes (avoids collision with repo READMEs)
@@ -275,9 +237,9 @@ git config --global worktree.useRelativePaths true
 
 With this setting, git creates worktrees with relative paths that work correctly when the workspace is bind-mounted into a container. This is entirely managed by git — aworkspace just creates worktrees using `git worktree add`, and git handles the path format based on your config.
 
-### Submodules
+### PLANNED: Submodules
 
-Worktrees don't initialize submodules by default. Set `init_submodules = true` in your config to auto-initialize them when creating worktrees.
+Worktrees don't initialize submodules by default. A future `init_submodules` config option will auto-initialize them when creating worktrees.
 
 ## License
 
