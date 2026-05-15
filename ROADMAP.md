@@ -73,6 +73,7 @@ Goal: Get the basic workspace management working. Create, list, and manage works
 - [x] **`aworkspace cd <name>`** — Output path for shell integration
 - [x] **`aworkspace init <shell>`** — Shell integration setup (emits shell wrapper for `cd`)
 - [ ] **`aworkspace init` auto-detect** — Default to auto-detecting shell (from `$SHELL` or parent process), keep explicit arg as optional override
+- [ ] **Tab completion for `aworkspace cd`** — Complete workspace names; critical for usability of `cd`
 - [ ] **`aworkspace rm [workspace]`** — Remove workspace (with safety checks)
 - [ ] **Better error messages** — User-friendly errors with suggestions
 
@@ -104,7 +105,6 @@ Goal: Get the basic workspace management working. Create, list, and manage works
 
 - [ ] `aworkspace doctor` — environment checks
 - [ ] Better git URL parsing (support all formats)
-- [ ] Migration tool for POC workspaces
 - [ ] Homebrew formula
 - [ ] **Rich `list` output** — flexible formatting like `ls -l`
   - `-l, --long` — detailed format (status, repo count, branches, last modified)
