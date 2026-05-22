@@ -122,3 +122,4 @@ Goal: Get the basic workspace management working. Create, list, and manage works
 - Workspace sharing/export
 - Ceiling paths for workspace discovery (à la `MISE_CEILING_PATHS`) — stop walking up at configured boundaries (e.g., network mounts)
 - Workspaces outside `WorkspacesDir` — already supported by discovery, but `list` and other commands may need awareness
+- `aworkspace cd` with no arg — interactive picker (à la `mise use`)
