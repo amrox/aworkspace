@@ -26,6 +26,9 @@ var rootCmd = &cobra.Command{
 			return err
 		}
 		cfg = &c
+		if v, _ := cmd.Flags().GetBool("verbose"); v {
+			workspace.CurLogLevel = workspace.LogLevelVerbose
+		}
 		return nil
 	},
 }
@@ -40,6 +43,7 @@ func Execute() {
 func init() {
 	rootCmd.SilenceUsage = true
 	rootCmd.SilenceErrors = true
+	rootCmd.PersistentFlags().BoolP("verbose", "v", false, "verbose output")
 }
 
 func addDirFlag(cmd *cobra.Command) {

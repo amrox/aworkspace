@@ -59,6 +59,10 @@ aworkspace list
 aworkspace show
 ```
 
+## Global Options
+
+- `-v, --verbose` — Show detailed output including git subprocess output
+
 ## Commands
 
 ### `aworkspace new <name>`
@@ -147,6 +151,9 @@ workspaces_dir = "~/Workspaces"
 bares_dir = "~/.local/share/aworkspace/repos"
 workspace_worktree_subdir = "code"
 branch_prefix = "ws/"
+
+[git]
+path = "/usr/local/bin/git"  # custom git binary (default: "git")
 ```
 
 **Options:**

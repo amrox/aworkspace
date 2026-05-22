@@ -20,7 +20,6 @@ type RepoConfig struct {
 }
 
 type WorkspaceMetadata struct {
-
 	Config struct {
 		WorktreeSubdir string `toml:"worktree_subdir"`
 	} `toml:"config"`
@@ -137,7 +136,7 @@ func LoadWorkspace(wsPath string) (Workspace, error) {
 	ws := NewWorkspace(wsPath)
 	err = ws.loadMetadata()
 	if err != nil {
-		 return Workspace{}, err
+		return Workspace{}, err
 	}
 
 	return ws, nil
@@ -157,10 +156,10 @@ func ListWorkspaces(config Config) ([]Workspace, error) {
 
 	for _, e := range entries {
 		if e.IsDir() {
-		wsPath := filepath.Join(config.WorkspacesDir, e.Name())
+			wsPath := filepath.Join(config.WorkspacesDir, e.Name())
 			ws, err := LoadWorkspace(wsPath)
 			if err != nil {
-				// TODO: logging
+				LogWarning("Could not load workspace at: %v\n", wsPath)
 			} else {
 				workspaces = append(workspaces, ws)
 			}
@@ -174,6 +173,12 @@ func defaultBranchName(workspace Workspace, config Config) string {
 }
 
 func (ws *Workspace) AddRepo(repoURL string, branch string, config Config) error {
+
+	for k := range ws.Metadata.Repos {
+		if ws.Metadata.Repos[k].URL == repoURL {
+			return fmt.Errorf("repo with URL %v already added to workspace", repoURL)
+		}
+	}
 
 	repo, err := parseRepoURL(repoURL)
 	if err != nil {
@@ -198,7 +203,7 @@ func (ws *Workspace) AddRepo(repoURL string, branch string, config Config) error
 		}
 	}()
 
-	err = addWorktree(bareRepoPath, workTreeDest, branch)
+	err = addWorktree(bareRepoPath, workTreeDest, branch, config)
 	if err != nil {
 		return err
 	}

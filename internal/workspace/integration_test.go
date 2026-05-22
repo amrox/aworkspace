@@ -9,6 +9,10 @@ import (
 	"testing"
 )
 
+func init() {
+	CurLogLevel = LogLevelVerbose
+}
+
 func createTestRepo(t *testing.T) string {
 	t.Helper()
 
