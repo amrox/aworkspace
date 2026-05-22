@@ -4,6 +4,7 @@ import (
 	_ "embed"
 	"fmt"
 
+	"github.com/amrox/aworkspace/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -26,8 +27,7 @@ var initCmd = &cobra.Command{
 		case "bash", "zsh":
 			// supported
 		default:
-			// TODO: log function
-			fmt.Fprintf(cmd.OutOrStderr(), "WARNING: shell %v is unsupported\n", shell)
+			workspace.Log(workspace.LogLevelNormal, "WARNING: shell %v is unsupported\n", shell)
 		}
 
 		fmt.Fprint(cmd.OutOrStdout(), initShTemplate)

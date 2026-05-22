@@ -1,8 +1,6 @@
 package cmd
 
 import (
-	"fmt"
-
 	"github.com/amrox/aworkspace/internal/workspace"
 	"github.com/spf13/cobra"
 )
@@ -23,7 +21,7 @@ var newCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		fmt.Fprintln(cmd.OutOrStdout(), "Created workspace:", ws.Name())
+		workspace.LogInfo("Created workspace: %s\n", ws.Name())
 		return nil
 	},
 }

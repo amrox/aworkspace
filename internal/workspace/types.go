@@ -11,23 +11,27 @@ import (
 // Errors
 var ErrNotInWorkspace = errors.New("not inside a workspace")
 
+type GitConfig struct {
+	Path string `toml:"path"`
+}
+
 type Config struct {
 	BaresDir       string `toml:"bares_dir"`
 	WorkspacesDir  string `toml:"workspaces_dir"`
 	WorktreeSubdir string `toml:"workspace_worktree_subdir"`
+	BranchPrefix   string `toml:"branch_prefix"`
 
-	BranchPrefix string `toml:"branch_prefix"`
+	Git GitConfig `toml:"git"`
 
 	// TODO: this is adapted from "init_submodules"
 	// I can think of 3 modes: "none", "init", "worktree-init"
 	// submoduleMode string
-
 }
 
 func homeDir() string {
 	homeDirVal, err := os.UserHomeDir()
 	if err != nil {
-			panic("could not determine home directory: " + err.Error())
+		panic("could not determine home directory: " + err.Error())
 	}
 	return homeDirVal
 }
@@ -87,7 +91,7 @@ func LoadOrDefaultConfig(path string) (Config, error) {
 }
 
 type Workspace struct {
-	Path string
+	Path     string
 	Metadata WorkspaceMetadata
 }
 

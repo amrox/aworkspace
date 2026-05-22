@@ -1,9 +1,7 @@
 package workspace
 
 import (
-	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -32,10 +30,10 @@ func parseRepoURL(rawURL string) (Repo, error) {
 	}
 
 	repo := Repo{
-		Host: host,
-		Name: name,
+		Host:      host,
+		Name:      name,
 		Namespace: namespace,
-		Url: rawURL,
+		Url:       rawURL,
 	}
 
 	return repo, nil
@@ -53,6 +51,16 @@ func (r Repo) bareRepoPath(config Config) string {
 	return filepath.Join(config.BaresDir, subPath)
 }
 
+func execGitCommand(config Config, args ...string) error {
+
+	git := "git"
+	if config.Git.Path != "" {
+		git = config.Git.Path
+	}
+
+	return execCommand(git, args...)
+}
+
 func cloneBareRepo(repoURL string, config Config) (string, error) {
 
 	repo, err := parseRepoURL(repoURL)
@@ -61,27 +69,22 @@ func cloneBareRepo(repoURL string, config Config) (string, error) {
 	}
 
 	destPath := repo.bareRepoPath(config)
-
 	if _, err := os.Stat(destPath); err == nil {
-    	return destPath, nil
+		Log(LogLevelNormal, "Using existing bare repo at: %v\n", destPath)
+		return destPath, nil
 	}
 
-	cmd := exec.Command("git", "clone", "--bare", repoURL, destPath)
-	output, err := cmd.CombinedOutput()
+	Log(LogLevelNormal, "Cloning bare repo to: %v\n", destPath)
+	err = execGitCommand(config, "clone", "--bare", repoURL, destPath)
 	if err != nil {
-		return "", fmt.Errorf("git clone failed: %q: %w", output, err)
+		return "", err
 	}
 	return destPath, nil
 }
 
-func addWorktree(bareRepoPath string, worktreeDest string, branch string) error {
+func addWorktree(bareRepoPath string, worktreeDest string, branch string, config Config) error {
 
-	cmd := exec.Command("git", "-C", bareRepoPath, "worktree", "add", worktreeDest, "-B", branch)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("git worktree add failed: %s: %w", output, err)
-	}
-	return nil
+	Log(LogLevelNormal, "Creating worktree: %v branch: %v\n", worktreeDest, branch)
+
+	return execGitCommand(config, "-C", bareRepoPath, "worktree", "add", worktreeDest, "-B", branch)
 }
-
-
