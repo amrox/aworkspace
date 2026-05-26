@@ -2,7 +2,7 @@ package cmd
 
 import (
 	_ "embed"
-	"fmt"
+	"text/template"
 
 	"github.com/amrox/aworkspace/internal/workspace"
 	"github.com/spf13/cobra"
@@ -30,7 +30,18 @@ var initCmd = &cobra.Command{
 			workspace.Log(workspace.LogLevelNormal, "WARNING: shell %v is unsupported\n", shell)
 		}
 
-		fmt.Fprint(cmd.OutOrStdout(), initShTemplate)
+		t1, err := template.New("t1").Parse(initShTemplate)
+		if err != nil {
+			return err
+		}
+
+		data := map[string]string {
+			"Shell": shell,
+		}
+		err = t1.Execute(cmd.OutOrStdout(), data)
+		if err != nil {
+			return err
+		}
 
 		return nil
 	},

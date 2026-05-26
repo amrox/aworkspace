@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/amrox/aworkspace/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -17,7 +18,20 @@ var cdCmd = &cobra.Command{
 	Short: "Change to workspace dir (requires shell hooks) (alias: switch)",
 	Aliases: []string{"switch"},
 	Args:  cobra.ExactArgs(1),
+	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 
+		workspaces, err := workspace.ListWorkspaces(*cfg)
+		if err != nil {
+		    return nil, cobra.ShellCompDirectiveNoFileComp
+		}
+
+		var names []string
+		for _, ws := range workspaces {
+			names = append(names, ws.Name())
+		}
+
+		return names, cobra.ShellCompDirectiveNoFileComp
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 
 		shellenv := os.Getenv("AWORKSPACE_SHELL")
