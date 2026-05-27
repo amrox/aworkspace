@@ -6,3 +6,4 @@ aworkspace() {
     command aworkspace "$@"
   fi
 }
+eval "$(command aworkspace completion {{.Shell}})"
