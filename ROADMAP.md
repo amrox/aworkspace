@@ -45,6 +45,124 @@ Without this, every agent session requires manual explanation of workspace isola
 
 **Checkout roles (edit vs reference):** Each repo checkout in a workspace could be tagged as either "edit" (actively being developed) or "reference" (read-only context for agents). For example, a workspace might have `my-service` as the edit target while `shared-lib` and `api-spec` are references. This distinction is purely advisory — it helps agents understand which code they should be modifying vs. just reading for context. Could be a field in `workspace.toml` per-repo entry.
 
+**Worktree subdir scoping (and "the workspaces root" as a first-class entity):** The worktree subdir name (`worktree_subdir`, e.g. `code/`) should be **scoped to the workspaces root, not to global config read at per-workspace creation time.** The current flaw: the value is resolved from transient global config when each workspace is created, so one root accumulates workspaces stamped with whatever global config said on each creation day — producing intra-root heterogeneity (`A/code/`, `B/worktrees/`). The configurability isn't the problem; the scope and timing are. Fix with three-level resolution (like git config / mise):
+
+- **global config** (`~/.config/aworkspace/config.toml`) — default for *new roots* only
+- **root config** (a marker at the workspaces root, e.g. `~/Workspaces/.aworkspace.toml`) — the value for *every* workspace in this root, written once from the global default at root init
+- **`workspace.toml`** — records the resolved value per workspace (self-describing; drives `.gitignore` generation; rarely hand-overridden)
+
+At `new`: read the root value (not global) → fall back to global only to initialize the root → write the resolved value into `workspace.toml`. Result: a root is homogeneous by construction (changing global config can't intermix dirs in an existing root), configurability survives (different roots can differ), and the only thing lost — different worktree dirs *within a single root* — is the footgun, not a feature.
+
+This formalizes **the workspaces root** as a managed entity rather than "whatever `WorkspacesDir` points at." It's the thing you `git init`/`jj git init`, and the root config file is the natural neighbor of the root-level universal `.gitignore` (worktree dirs, `tmp/`, `secrets/`) — both are properties of the collection, set once at the root.
+
+Related rule: **worktrees live in a dedicated, non-empty subdir** (name configurable, emptiness disallowed). `worktree_subdir = ''` puts worktrees at the workspace root intermixed with the record, destroying the clean ignore/layer boundary. (If `''` ever must be supported, the generated `.gitignore` would enumerate worktree dirs by repo name from `workspace.toml` — simpler to just disallow empty.)
+
+**Open question:** root config file name/location (`~/Workspaces/.aworkspace.toml` vs `.aworkspace/config.toml` vs reusing an existing marker), and whether the root config is required or optional (fall back to global when absent).
+
+## Workspace Lifecycle: rm, archive, prune
+
+Design from the 2026-05-29 brainstorm. This is the model behind `rm`/`prune` (see 0.1–0.2 below) and the archive concept.
+
+### Guiding philosophy
+
+> aworkspace marries git worktrees + plain-text context. What you do with the context is yours.
+
+aworkspace produces durable, greppable, plain-text artifacts and stays out of the way of whatever you layer on top — git, jj, Obsidian, Syncthing, or nothing. It does not own your files, enforce policy, or reinvent storage/backup machinery. The recurring stance for risky operations is **visibility, never enforcement**.
+
+### Two independent lifecycle axes
+
+1. **Status (active / inactive)** — a flag in `workspace.toml`. The workspace stays fully intact on disk; "inactive" just hides it from `list` by default. Instantly reversible, cheap. Easy to layer on later; not the current focus.
+2. **Physical state (live → archived → purged)** — a transformation. Archiving detaches worktrees and moves the record aside; purging destroys the record. This is the real design work.
+
+### Layer model (Docker analogy)
+
+A workspace is three materials with different reconstructibility, which dictates the safety rules:
+
+| Layer | Workspace content | Reconstructible? | Removed by |
+|---|---|---|---|
+| Container | Worktrees + working-tree changes (`code/`) | Mostly (remote + branch) | `rm` (default) |
+| Image | The **record**: `workspace.toml`, `WORKSPACE.md`, notes/resources | No — irreplaceable | `rm --purge` |
+| Base layers | Shared **bare repos** (live outside the workspace) | Yes (re-clone) | `prune` only |
+
+Safety property: **no single-workspace command can ever delete shared state.** Bare repos are refcounted layers; only the explicit, global `prune` reclaims dangling ones.
+
+### Command family (safe by default)
+
+- **`rm` = archive (default, safe).** Detaches worktrees (the container), keeps the record (the image), moves the workspace dir to `_archive/`. Never touches bare repos. This is the everyday, muscle-memory verb — destruction is opt-in.
+- **`rm --purge`** — also deletes the record. Irreversible.
+- **`prune`** — global GC of bare repos no workspace references. A separate operation, never a side effect of `rm` (see 0.2).
+
+Primary motivation for archive is **preserving the record/memory**. Resumability (re-create worktrees on the same branches, or `new --from` an archived workspace) is a secondary bonus that falls out of keeping `workspace.toml` + final commit SHAs in the record.
+
+### Archive substrate: plain move-aside folder
+
+Archiving moves the workspace dir (minus dropped layers) to `_archive/` as a **plain folder of files**. Not a tarball (opaque — can't grep or `cd` into it), not git-baked (binaries bloat history; couples aworkspace to a VCS). If you want the archive in version control, that's the orthogonal VCS-tracking story below — your call, not aworkspace's.
+
+### Index: self-describing folders + regenerable ledger
+
+- **Source of truth = the frozen folders.** Archiving stamps structured frontmatter into the record (archived date; repos + branches + final SHAs; a 1–3 sentence summary, optional keywords/ticket). Travels with the folder, survives a manual `mv`, can't be orphaned.
+- **`_archive/INDEX.md` = a derived cache** — a compact one-line-per-workspace ledger, written at archive time and fully regenerable by walking the archives (`archive reindex`). Gives agents/tools a token-cheap scan without walking N folders. It is never the authority: delete it and it rebuilds from the folders.
+- **The asymmetry is intentional.** Live workspaces are walk-only (small N, mutating — an index would just drift). Archived workspaces get the ledger (large N, frozen — no drift possible). `list` shows live by default; `list --archived` reads the ledger. The friction asymmetry (live = rich, archived = one-liner) is what rewards archiving instead of hoarding (the "Kanban Done column that never ages out" problem).
+- **"Frozen" is a convention, not enforced.** Editing or deleting files in an archive breaks nothing — `reindex` reconciles the cache, and the recourse to "I don't want this archived file anymore" is just `rm thefile` (it's a plain folder).
+
+### File-handling conventions: two filters, named directories
+
+Two independent filters: the generated `.gitignore` ("VCS-tracked?") and the archive-exclude list ("Archived?"). Special directories are named points on that grid — conventions with escape hatches, not enforcement (a configurable policy engine can come later; don't build one now):
+
+| Bucket | Examples | VCS-tracked | Archived |
+|---|---|---|---|
+| Record | `WORKSPACE.md`, notes, `*.toml`/`*.md` | ✅ | ✅ |
+| Sensitive | `secrets/`, `.env` | ❌ | ✅ (kept, but stays ignored) |
+| Ephemeral | `tmp/` | ❌ | ❌ |
+| Reconstructible | `code/` (worktrees) | ❌ | ❌ |
+
+- **`secrets/`** — VCS-ignored **everywhere** via a path-agnostic pattern (so it stays ignored inside `_archive/…/` too) → a self-contained, resumable env that never pushes. Kept on archive (dev-grade keys, local-only, bounded liability; delete manually if undesired). Print a warning when archiving secrets, e.g. `[WARNING] 3 files in secrets/ will be archived.`
+- **`tmp/`** — ignore + drop. Pure scratch.
+- Caveat: VCS-ignore only guards the git-push foot-gun. Non-VCS sync (Time Machine, Syncthing) of an archive still carries secrets along — the user's tool choice, out of scope. aworkspace is not a watchdog.
+
+### Big files: visibility, never enforcement
+
+Archives are forever, so heavy files in the record layer are paid for forever. At archive time (and optionally in `list`/`show`), surface size and flag the heaviest offenders, e.g. `Archiving feature1: 2.1 GB, 1.9 GB of which is assets/demo.mov. Continue?`. The warn threshold is **configurable**. aworkspace never blocks or quarantines — the same onus the user already carries for source code.
+
+**Non-goal:** aworkspace does not compress, dedup, or transform archived files. Those capabilities already exist one layer down (APFS/ZFS CoW, Time Machine, borg/restic, git-LFS) and the plain-folder output keeps them all usable. Compression also fights the plain-text value; users who want it can script it over the folder.
+
+### VCS tracking: fully hands-off
+
+- Generate a sensible `.gitignore` at `new` time (ignores the worktree subdir + `tmp/` + `secrets/`), disable-able in config — same pattern as auto-`CLAUDE.md`. One file serves git **and** jj (jj reads `.gitignore`).
+- **Never `git init` for the user.** A dormant `.gitignore` in a non-git folder is harmless; initializing a repo is reaching into the user's territory. Lay the groundwork; never opt in for them.
+- Ignoring `code/` makes the VCS boundary line up exactly with the layer boundary (track record + archive, ignore worktrees, never see bare repos) and sidesteps the embedded-repo problem.
+- Tips & tricks doc section ("Using aworkspace with git/jj"): track the workspaces dir on a **single linear history — never branch** (the cross-product of every project's worktree state is the head-spin). jj's working-copy-as-commit auto-snapshot is a strong fit for a frictionless memory journal. jj's LFS/submodule gaps don't affect this use case — the journal is plain text and worktrees are ignored, while project repos inside `code/` keep using git + LFS + submodules independently. The VCS choice for the journal is decoupled from what the projects need.
+- **Backup vs. sync guidance** (docs): adding a workspaces root to VCS is useful for historical tracking and off-machine backup. Syncing the repo across multiple machines is up to the user — conflicts, branching, and merge are VCS workflow, not the tool's job. Secrets and other untracked files don't travel with the repo by design.
+
+### Rehydrate: archive's inverse, and the backup-loop closer
+
+A command that makes on-disk reality match the record — recreate missing bares and worktrees from `workspace.toml` (URLs + base branches + recorded SHAs). **Name is a working title; candidates: `rehydrate` / `restore` / `materialize` / `doctor --fix`.** The capability is what matters, not the name.
+
+It's more load-bearing than a mere repair tool: **because `code/` is gitignored, a VCS backup deliberately omits the worktrees and bares.** So a fresh clone of the journal on a new machine is just the record — nothing runnable. Rehydrate is the *only* thing that turns that record back into a working setup, which means the moment VCS-backup is a goal, rehydrate stops being optional. It's a single primitive that serves three needs:
+
+- **New machine / disaster recovery** — clone the journal, rehydrate the worktrees.
+- **Resume an archived workspace** — archive detached the worktrees; rehydrate reattaches them.
+- **Repair** — `code/` got deleted or corrupted; rehydrate restores it.
+
+**Restore boundary** (maps onto the layer model — restores the *reconstructible* layer from the *record*, nothing more):
+
+| Layer | Restored? | From |
+|---|---|---|
+| Record (notes, `workspace.toml`) | ✅ already present | the VCS clone |
+| Bares + worktrees | ✅ recreated | re-clone + worktree add at recorded base/SHA |
+| `secrets/` | ❌ not restored | gitignored — user re-provides |
+| Uncommitted worktree changes | ❌ gone | never in VCS/bares unless pushed |
+
+Secrets not syncing is correct and desired, but it's a sharp edge on a fresh restore — so rehydrate should *say so*: a one-line `secrets/ is gitignored and was not restored — re-add your env files` (visibility, never enforcement, same as the big-files warning). Out of scope: multi-machine conflicts, branching, and sharing of the journal repo — that's the user's VCS workflow.
+
+### Parked implementation TODOs
+
+- **Archived folder naming/deconfliction** — archive-forever guarantees eventual `feature1` collisions. Leaning `name@date` (e.g. `_archive/feature1@2026-05-02/`) with a same-day `-N` fallback; friendly name preserved in frontmatter. Doesn't affect the design.
+- `archive reindex` — rebuild `_archive/INDEX.md` from the folders.
+- Possible `archive clean` to bulk-prune old archives (but it's flat files — easy to do manually).
+- Possible `import-resource` using APFS `clonefile` for cheap CoW copies — only if aworkspace is ever the one doing the copying.
+- `inactive` flag in `workspace.toml` + `list` filtering — an easy layer-on.
+
 ## Milestone 0.1 - Core Functionality
 
 Goal: Get the basic workspace management working. Create, list, and manage workspaces with multiple repos.
@@ -72,9 +190,8 @@ Goal: Get the basic workspace management working. Create, list, and manage works
 
 - [x] **`aworkspace cd <name>`** — Output path for shell integration
 - [x] **`aworkspace init <shell>`** — Shell integration setup (emits shell wrapper for `cd`)
-- [ ] **`aworkspace init` auto-detect** — Default to auto-detecting shell (from `$SHELL` or parent process), keep explicit arg as optional override
-- [ ] **Tab completion for `aworkspace cd`** — Complete workspace names; critical for usability of `cd`
-- [ ] **`aworkspace rm [workspace]`** — Remove workspace (with safety checks)
+- [x] **Tab completion for `aworkspace cd`** — Complete workspace names; critical for usability of `cd`
+- [ ] **`aworkspace rm [workspace]`** — Safe-by-default archive (detach worktrees, keep the record, move to `_archive/`); `--purge` to destroy the record. See "Workspace Lifecycle" above.
 - [ ] **Better error messages** — User-friendly errors with suggestions
 
 ### Out of Scope for 0.1
@@ -91,8 +208,10 @@ Goal: Get the basic workspace management working. Create, list, and manage works
 
 - [ ] Shell completion (bash/zsh/fish)
 - [ ] Submodule support (with git-worktree-tools integration)
-- [ ] `aworkspace rm` with uncommitted change detection
-- [ ] `aworkspace prune` for orphaned bare repos
+- [ ] `aworkspace rm` with uncommitted change detection (warn before archiving dirty/unpushed worktrees)
+- [ ] Archive index — stamp frontmatter into the record + write/regenerate `_archive/INDEX.md` ledger (`archive reindex`); `list --archived`
+- [ ] File-handling conventions — generate default `.gitignore` (worktree subdir + `tmp/` + `secrets/`), archive-exclude `tmp/`/`code/`, keep-but-ignore `secrets/` with size + secrets warnings
+- [ ] `aworkspace prune` for orphaned bare repos (global GC, never a side effect of `rm`)
 - [ ] `aworkspace update` — fetch and rebase workspace branches
 - [ ] `aworkspace reset` — reset workspace to clean state
 - [ ] Bookmarks for common git hosts
@@ -122,4 +241,5 @@ Goal: Get the basic workspace management working. Create, list, and manage works
 - Workspace sharing/export
 - Ceiling paths for workspace discovery (à la `MISE_CEILING_PATHS`) — stop walking up at configured boundaries (e.g., network mounts)
 - Workspaces outside `WorkspacesDir` — already supported by discovery, but `list` and other commands may need awareness
+- **Multiple workspace roots** (e.g. work vs personal) — each root is an independent collection with its own root config and (optionally) its own VCS history. Resolution precedence: `--root` flag → `AWORKSPACE_ROOT` env var → global-config default. Shell integration could switch roots like `cd` does. Composes cleanly with the root-scoped-config design above — a root is already self-describing, so "more than one" needs no new model. Later nicety: a named-roots registry in global config (`[roots] work = "…"`) for `--root work` by name + completion. Only commands that *enumerate* (`list`) or *create* (`new`) care about the active root; commands inside a workspace still infer from cwd. Not needed for first releases.
 - `aworkspace cd` with no arg — interactive picker (à la `mise use`)
