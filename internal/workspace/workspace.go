@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"bytes"
 	_ "embed"
 	"fmt"
 	"os"
@@ -13,6 +14,7 @@ import (
 const workspaceRootMetaDirName = ".aworkspace"
 const workspaceRootMetaFile = "meta.toml"
 const workspaceMetaFile = ".aworkspace.toml"
+const workspaceMetaComment = "# managed by aworkspace — do not edit directly\n\n"
 
 //go:embed templates/CLAUDE.md
 var claudeMdTemplate string
@@ -51,13 +53,22 @@ func FindWorkspaceDir(startDir string) (string, error) {
 	}
 }
 
-func (w *Workspace) writeMetadata() error {
-	bytes, err := toml.Marshal(w.Metadata)
+func writeMetadataFile(path string, data any) error {
+
+	var buf bytes.Buffer
+	buf.WriteString(workspaceMetaComment)
+
+	err := toml.NewEncoder(&buf).Encode(data)
 	if err != nil {
 		return err
 	}
 
-	return os.WriteFile(filepath.Join(w.Path, workspaceMetaFile), bytes, 0666)
+	return os.WriteFile(path, buf.Bytes(), 0644)
+}
+
+func (w *Workspace) writeMetadata() error {
+
+	return writeMetadataFile(filepath.Join(w.Path, workspaceMetaFile), w.Metadata)
 }
 
 func loadRootMetadata(workspaceRootPath string) (WorkspaceRootMetadata, error) {
@@ -279,15 +290,6 @@ func CreateWorkspaceRoot(path string, config Config) error {
 		WorktreeSubdir: config.WorktreeSubdir,
 	}
 
-	bytes, err := toml.Marshal(meta)
-	if err != nil {
-		return err
-	}
-
 	wsRootMetaPath := filepath.Join(wsRootMetaDirPath, workspaceRootMetaFile)
-	err = os.WriteFile(wsRootMetaPath, bytes, 0666)
-	if err != nil {
-		return err
-	}
-	return nil
+	return writeMetadataFile(wsRootMetaPath, meta)
 }
