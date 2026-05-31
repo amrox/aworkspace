@@ -17,5 +17,5 @@ Go CLI for lightweight workspace management — creating and managing directorie
 - Primary noun is **workspace** (not "project")
 - Branch prefix default: `ws/`
 - Config file: `~/.config/aworkspace/config.toml`
-- Workspace marker: `workspace.toml`
+- Workspace marker: `.aworkspace.toml`
 - See `ROADMAP.md` for milestones and design decisions

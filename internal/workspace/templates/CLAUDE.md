@@ -5,7 +5,7 @@ repos, constraints, and current status.
 
 This directory contains git worktrees for one or more repos, all related to
 a single initiative. Each worktree is a subdirectory which may have its own
-`CLAUDE.md`. `workspace.toml` is the workspace configuration — do not modify it.
+`CLAUDE.md`. `.aworkspace.toml` is the workspace configuration — do not modify it.
 
 ## Rules
 

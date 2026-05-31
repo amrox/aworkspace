@@ -10,7 +10,7 @@
 
 **Branch collision handling:** If a `ws/<name>` branch already exists or is already checked out, `add-repo` will fail with a clear error. No auto-suffixing or magic renaming. This should be rare since `ws/` is aworkspace's namespace. If it happens, it usually means a workspace was removed without cleanup (which `doctor` would flag).
 
-**Base branch tracking:** Each repo in a workspace can specify a `base_branch` — the upstream branch the workspace checkout is based on. Stored in `workspace.toml` per-repo (not derived from git tracking):
+**Base branch tracking:** Each repo in a workspace can specify a `base_branch` — the upstream branch the workspace checkout is based on. Stored in `.aworkspace.toml` per-repo (not derived from git tracking):
 
 ```toml
 [repos.my-service]
@@ -43,21 +43,21 @@ This needs to be configurable:
 
 Without this, every agent session requires manual explanation of workspace isolation rules.
 
-**Checkout roles (edit vs reference):** Each repo checkout in a workspace could be tagged as either "edit" (actively being developed) or "reference" (read-only context for agents). For example, a workspace might have `my-service` as the edit target while `shared-lib` and `api-spec` are references. This distinction is purely advisory — it helps agents understand which code they should be modifying vs. just reading for context. Could be a field in `workspace.toml` per-repo entry.
+**Checkout roles (edit vs reference):** Each repo checkout in a workspace could be tagged as either "edit" (actively being developed) or "reference" (read-only context for agents). For example, a workspace might have `my-service` as the edit target while `shared-lib` and `api-spec` are references. This distinction is purely advisory — it helps agents understand which code they should be modifying vs. just reading for context. Could be a field in `.aworkspace.toml` per-repo entry.
 
 **Worktree subdir scoping (and "the workspaces root" as a first-class entity):** The worktree subdir name (`worktree_subdir`, e.g. `code/`) should be **scoped to the workspaces root, not to global config read at per-workspace creation time.** The current flaw: the value is resolved from transient global config when each workspace is created, so one root accumulates workspaces stamped with whatever global config said on each creation day — producing intra-root heterogeneity (`A/code/`, `B/worktrees/`). The configurability isn't the problem; the scope and timing are. Fix with three-level resolution (like git config / mise):
 
 - **global config** (`~/.config/aworkspace/config.toml`) — default for *new roots* only
-- **root config** (a marker at the workspaces root, e.g. `~/Workspaces/.aworkspace.toml`) — the value for *every* workspace in this root, written once from the global default at root init
-- **`workspace.toml`** — records the resolved value per workspace (self-describing; drives `.gitignore` generation; rarely hand-overridden)
+- **root config** (`~/Workspaces/.aworkspace/meta.toml`) — the value for *every* workspace in this root, written once from the global default at root init
+- **`.aworkspace.toml`** — records the resolved value per workspace (self-describing; drives `.gitignore` generation; rarely hand-overridden)
 
-At `new`: read the root value (not global) → fall back to global only to initialize the root → write the resolved value into `workspace.toml`. Result: a root is homogeneous by construction (changing global config can't intermix dirs in an existing root), configurability survives (different roots can differ), and the only thing lost — different worktree dirs *within a single root* — is the footgun, not a feature.
+At `new`: read the root value (not global) → fall back to global only to initialize the root → write the resolved value into `.aworkspace.toml`. Result: a root is homogeneous by construction (changing global config can't intermix dirs in an existing root), configurability survives (different roots can differ), and the only thing lost — different worktree dirs *within a single root* — is the footgun, not a feature.
 
 This formalizes **the workspaces root** as a managed entity rather than "whatever `WorkspacesDir` points at." It's the thing you `git init`/`jj git init`, and the root config file is the natural neighbor of the root-level universal `.gitignore` (worktree dirs, `tmp/`, `secrets/`) — both are properties of the collection, set once at the root.
 
-Related rule: **worktrees live in a dedicated, non-empty subdir** (name configurable, emptiness disallowed). `worktree_subdir = ''` puts worktrees at the workspace root intermixed with the record, destroying the clean ignore/layer boundary. (If `''` ever must be supported, the generated `.gitignore` would enumerate worktree dirs by repo name from `workspace.toml` — simpler to just disallow empty.)
+Related rule: **worktrees live in a dedicated, non-empty subdir** (name configurable, emptiness disallowed). `worktree_subdir = ''` puts worktrees at the workspace root intermixed with the record, destroying the clean ignore/layer boundary. (If `''` ever must be supported, the generated `.gitignore` would enumerate worktree dirs by repo name from `.aworkspace.toml` — simpler to just disallow empty.)
 
-**Open question:** root config file name/location (`~/Workspaces/.aworkspace.toml` vs `.aworkspace/config.toml` vs reusing an existing marker), and whether the root config is required or optional (fall back to global when absent).
+**Decided:** root config lives at `.aworkspace/meta.toml` within the workspaces root. Required (created by `CreateWorkspaceRoot`).
 
 ## Workspace Lifecycle: rm, archive, prune
 
@@ -71,7 +71,7 @@ aworkspace produces durable, greppable, plain-text artifacts and stays out of th
 
 ### Two independent lifecycle axes
 
-1. **Status (active / inactive)** — a flag in `workspace.toml`. The workspace stays fully intact on disk; "inactive" just hides it from `list` by default. Instantly reversible, cheap. Easy to layer on later; not the current focus.
+1. **Status (active / inactive)** — a flag in `.aworkspace.toml`. The workspace stays fully intact on disk; "inactive" just hides it from `list` by default. Instantly reversible, cheap. Easy to layer on later; not the current focus.
 2. **Physical state (live → archived → purged)** — a transformation. Archiving detaches worktrees and moves the record aside; purging destroys the record. This is the real design work.
 
 ### Layer model (Docker analogy)
@@ -81,7 +81,7 @@ A workspace is three materials with different reconstructibility, which dictates
 | Layer | Workspace content | Reconstructible? | Removed by |
 |---|---|---|---|
 | Container | Worktrees + working-tree changes (`code/`) | Mostly (remote + branch) | `rm` (default) |
-| Image | The **record**: `workspace.toml`, `WORKSPACE.md`, notes/resources | No — irreplaceable | `rm --purge` |
+| Image | The **record**: `.aworkspace.toml`, `WORKSPACE.md`, notes/resources | No — irreplaceable | `rm --purge` |
 | Base layers | Shared **bare repos** (live outside the workspace) | Yes (re-clone) | `prune` only |
 
 Safety property: **no single-workspace command can ever delete shared state.** Bare repos are refcounted layers; only the explicit, global `prune` reclaims dangling ones.
@@ -92,7 +92,7 @@ Safety property: **no single-workspace command can ever delete shared state.** B
 - **`rm --purge`** — also deletes the record. Irreversible.
 - **`prune`** — global GC of bare repos no workspace references. A separate operation, never a side effect of `rm` (see 0.2).
 
-Primary motivation for archive is **preserving the record/memory**. Resumability (re-create worktrees on the same branches, or `new --from` an archived workspace) is a secondary bonus that falls out of keeping `workspace.toml` + final commit SHAs in the record.
+Primary motivation for archive is **preserving the record/memory**. Resumability (re-create worktrees on the same branches, or `new --from` an archived workspace) is a secondary bonus that falls out of keeping `.aworkspace.toml` + final commit SHAs in the record.
 
 ### Archive substrate: plain move-aside folder
 
@@ -136,7 +136,7 @@ Archives are forever, so heavy files in the record layer are paid for forever. A
 
 ### Rehydrate: archive's inverse, and the backup-loop closer
 
-A command that makes on-disk reality match the record — recreate missing bares and worktrees from `workspace.toml` (URLs + base branches + recorded SHAs). **Name is a working title; candidates: `rehydrate` / `restore` / `materialize` / `doctor --fix`.** The capability is what matters, not the name.
+A command that makes on-disk reality match the record — recreate missing bares and worktrees from `.aworkspace.toml` (URLs + base branches + recorded SHAs). **Name is a working title; candidates: `rehydrate` / `restore` / `materialize` / `doctor --fix`.** The capability is what matters, not the name.
 
 It's more load-bearing than a mere repair tool: **because `code/` is gitignored, a VCS backup deliberately omits the worktrees and bares.** So a fresh clone of the journal on a new machine is just the record — nothing runnable. Rehydrate is the *only* thing that turns that record back into a working setup, which means the moment VCS-backup is a goal, rehydrate stops being optional. It's a single primitive that serves three needs:
 
@@ -148,7 +148,7 @@ It's more load-bearing than a mere repair tool: **because `code/` is gitignored,
 
 | Layer | Restored? | From |
 |---|---|---|
-| Record (notes, `workspace.toml`) | ✅ already present | the VCS clone |
+| Record (notes, `.aworkspace.toml`) | ✅ already present | the VCS clone |
 | Bares + worktrees | ✅ recreated | re-clone + worktree add at recorded base/SHA |
 | `secrets/` | ❌ not restored | gitignored — user re-provides |
 | Uncommitted worktree changes | ❌ gone | never in VCS/bares unless pushed |
@@ -161,7 +161,7 @@ Secrets not syncing is correct and desired, but it's a sharp edge on a fresh res
 - `archive reindex` — rebuild `_archive/INDEX.md` from the folders.
 - Possible `archive clean` to bulk-prune old archives (but it's flat files — easy to do manually).
 - Possible `import-resource` using APFS `clonefile` for cheap CoW copies — only if aworkspace is ever the one doing the copying.
-- `inactive` flag in `workspace.toml` + `list` filtering — an easy layer-on.
+- `inactive` flag in `.aworkspace.toml` + `list` filtering — an easy layer-on.
 
 ## Milestone 0.1 - Core Functionality
 
@@ -171,8 +171,8 @@ Goal: Get the basic workspace management working. Create, list, and manage works
 
 - [x] **Core data types** — `Workspace`, `Repo`, `Config` structs in `internal/workspace/`
 - [x] **Config loading** — Read/write `~/.config/aworkspace/config.toml` with defaults
-- [x] **Workspace discovery** — Find workspace by walking up from cwd to locate `workspace.toml`
-- [x] **`aworkspace new <name>`** — Create workspace directory with `workspace.toml`, `WORKSPACE.md`, and `CLAUDE.md`
+- [x] **Workspace discovery** — Find workspace by walking up from cwd to locate `.aworkspace.toml`
+- [x] **`aworkspace new <name>`** — Create workspace directory with `.aworkspace.toml`, `WORKSPACE.md`, and `CLAUDE.md`
   - `CLAUDE.md` includes default workspace isolation rules for agents
   - Makes agents immediately understand that repos are independent projects
 - [x] **`aworkspace list`** — List all workspaces (basic: name only)
@@ -180,7 +180,7 @@ Goal: Get the basic workspace management working. Create, list, and manage works
 - [x] **`aworkspace add-repo <url> [branch]`** — Clone bare repo + create worktree
   - Handle bare clone creation
   - Create worktree with branch
-  - Update `workspace.toml` with repo metadata
+  - Update `.aworkspace.toml` with repo metadata
   - Support branch naming with configurable prefix
   - **Support multiple different repos per workspace**
 - [x] **`-C <path>` flag** — Override working directory for commands that depend on cwd (`show`, `add-repo`)
@@ -231,7 +231,7 @@ Goal: Get the basic workspace management working. Create, list, and manage works
   - `--format <template>` — custom output format
   - Sortable fields (name, created, modified, status)
   - Filter by status or other attributes
-- [ ] **Optional workspace subtitle** — One-line description field in `workspace.toml` (e.g., `subtitle = "Q2 nav rewrite"`), shown in `list -l`
+- [ ] **Optional workspace subtitle** — One-line description field in `.aworkspace.toml` (e.g., `subtitle = "Q2 nav rewrite"`), shown in `list -l`
 
 ## Future
 

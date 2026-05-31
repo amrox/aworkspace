@@ -19,7 +19,7 @@ aworkspace uses **git worktrees** to create isolated working directories for eac
 
 ~/Workspaces/                      # Workspaces
   my-feature/
-    workspace.toml                 # Workspace config
+    .aworkspace.toml               # Workspace config
     WORKSPACE.md                   # Goals, context, notes
     CLAUDE.md                      # Agent instructions
     code/
@@ -67,7 +67,7 @@ aworkspace show
 
 ### `aworkspace new <name>`
 
-Create a new workspace. Creates the directory structure and initializes `workspace.toml`, `WORKSPACE.md`, and `CLAUDE.md`.
+Create a new workspace. Creates the directory structure and initializes `.aworkspace.toml`, `WORKSPACE.md`, and `CLAUDE.md`.
 
 ### `aworkspace list`
 
@@ -206,11 +206,8 @@ This is useful for:
 
 Each workspace contains:
 
-**`workspace.toml`** — Structured config
+**`.aworkspace.toml`** — Structured config
 ```toml
-[config]
-worktree_subdir = "code"
-
 [repos]
 repo-a = { url = "git@github.com:user/repo-a.git" }
 repo-b = { url = "git@github.com:user/repo-b.git" }
