@@ -5,9 +5,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/pelletier/go-toml/v2"
 )
+
+const workspaceRootMetaDirName = ".aworkspace"
+const workspaceRootMetaFile = "meta.toml"
+const workspaceMetaFile = ".aworkspace.toml"
 
 //go:embed templates/CLAUDE.md
 var claudeMdTemplate string
@@ -19,18 +24,20 @@ type RepoConfig struct {
 	URL string `toml:"url"`
 }
 
+type WorkspaceRootMetadata struct {
+	WorktreeSubdir string `toml:"worktree_subdir"`
+}
+
 type WorkspaceMetadata struct {
-	Config struct {
-		WorktreeSubdir string `toml:"worktree_subdir"`
-	} `toml:"config"`
-	Repos map[string]RepoConfig `toml:"repos"`
+	Repos map[string]RepoConfig  `toml:"repos"`
+	Root  *WorkspaceRootMetadata `toml:"-"`
 }
 
 func FindWorkspaceDir(startDir string) (string, error) {
 	dir := startDir
 
 	for {
-		_, err := os.Stat(filepath.Join(dir, "workspace.toml"))
+		_, err := os.Stat(filepath.Join(dir, workspaceMetaFile))
 		if err == nil {
 			return dir, nil
 		} else if !os.IsNotExist(err) {
@@ -50,16 +57,26 @@ func (w *Workspace) writeMetadata() error {
 		return err
 	}
 
-	err = os.WriteFile(filepath.Join(w.Path, "workspace.toml"), bytes, 0666)
-	if err != nil {
-		return err
-	}
-	return nil
+	return os.WriteFile(filepath.Join(w.Path, workspaceMetaFile), bytes, 0666)
 }
 
-func (w *Workspace) loadMetadata() error {
+func loadRootMetadata(workspaceRootPath string) (WorkspaceRootMetadata, error) {
+	wsRootMetaPath := filepath.Join(workspaceRootPath, workspaceRootMetaDirName, workspaceRootMetaFile)
+	bytes, err := os.ReadFile(wsRootMetaPath)
+	if err != nil {
+		return WorkspaceRootMetadata{}, fmt.Errorf("could not find workspace root metadata: %w", err)
+	}
+	var wsRootMeta WorkspaceRootMetadata
+	err = toml.Unmarshal(bytes, &wsRootMeta)
+	if err != nil {
+		return WorkspaceRootMetadata{}, err
+	}
+	return wsRootMeta, nil
+}
 
-	bytes, err := os.ReadFile(filepath.Join(w.Path, "workspace.toml"))
+func (w *Workspace) loadMetadata(wsRootMeta WorkspaceRootMetadata) error {
+
+	bytes, err := os.ReadFile(filepath.Join(w.Path, workspaceMetaFile))
 	if err != nil {
 		return err
 	}
@@ -68,6 +85,9 @@ func (w *Workspace) loadMetadata() error {
 	if err != nil {
 		return err
 	}
+
+	w.Metadata.Root = &wsRootMeta
+
 	return nil
 }
 
@@ -116,7 +136,6 @@ func CreateWorkspace(name string, config Config) (Workspace, error) {
 	}
 
 	ws := NewWorkspace(wsPath)
-	ws.Metadata.Config.WorktreeSubdir = config.WorktreeSubdir
 	err = ws.writeMetadata()
 	if err != nil {
 		return Workspace{}, err
@@ -133,8 +152,14 @@ func LoadWorkspace(wsPath string) (Workspace, error) {
 		return Workspace{}, fmt.Errorf("workspace path %q not found: %w", wsPath, err)
 	}
 
+	wsRootPath := filepath.Join(wsPath, "..")
+	wsRootMeta, err := loadRootMetadata(wsRootPath)
+	if err != nil {
+		return Workspace{}, err
+	}
+
 	ws := NewWorkspace(wsPath)
-	err = ws.loadMetadata()
+	err = ws.loadMetadata(wsRootMeta)
 	if err != nil {
 		return Workspace{}, err
 	}
@@ -155,7 +180,7 @@ func ListWorkspaces(config Config) ([]Workspace, error) {
 	var workspaces []Workspace
 
 	for _, e := range entries {
-		if e.IsDir() {
+		if e.IsDir() && !strings.HasPrefix(e.Name(), ".") {
 			wsPath := filepath.Join(config.WorkspacesDir, e.Name())
 			ws, err := LoadWorkspace(wsPath)
 			if err != nil {
@@ -195,7 +220,7 @@ func (ws *Workspace) AddRepo(repoURL string, branch string, config Config) error
 	}
 
 	// TODO: handle conflicting worktree paths
-	workTreeDest := filepath.Join(ws.Path, config.WorktreeSubdir, repo.Name)
+	workTreeDest := filepath.Join(ws.Path, ws.Metadata.Root.WorktreeSubdir, repo.Name)
 	success := false
 	defer func() {
 		if !success {
@@ -215,5 +240,54 @@ func (ws *Workspace) AddRepo(repoURL string, branch string, config Config) error
 	}
 
 	success = true
+	return nil
+}
+
+func CreateWorkspaceRoot(path string, config Config) error {
+
+	fileInfo, err := os.Stat(path)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return err
+		}
+		// create directory
+		err := os.MkdirAll(path, 0755)
+		if err != nil {
+			return err
+		}
+
+	} else if !fileInfo.IsDir() {
+		return fmt.Errorf("%s exists but is not a directory", path)
+
+	} else {
+		entries, err := os.ReadDir(path)
+		if err != nil {
+			return err
+		}
+		if len(entries) > 0 {
+			return fmt.Errorf("directory %s is not empty", path)
+		}
+	}
+
+	wsRootMetaDirPath := filepath.Join(path, workspaceRootMetaDirName)
+	err = os.MkdirAll(wsRootMetaDirPath, 0755)
+	if err != nil {
+		return err
+	}
+
+	meta := WorkspaceRootMetadata{
+		WorktreeSubdir: config.WorktreeSubdir,
+	}
+
+	bytes, err := toml.Marshal(meta)
+	if err != nil {
+		return err
+	}
+
+	wsRootMetaPath := filepath.Join(wsRootMetaDirPath, workspaceRootMetaFile)
+	err = os.WriteFile(wsRootMetaPath, bytes, 0666)
+	if err != nil {
+		return err
+	}
 	return nil
 }

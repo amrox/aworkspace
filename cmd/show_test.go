@@ -14,7 +14,11 @@ func TestShowWithDirFlag(t *testing.T) {
 	dir := t.TempDir()
 	t.Log(dir)
 	config := workspace.Config{WorkspacesDir: dir, WorktreeSubdir: "code"}
-	_, err := workspace.CreateWorkspace("test-ws", config)
+	err := workspace.CreateWorkspaceRoot(dir, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = workspace.CreateWorkspace("test-ws", config)
 	if err != nil {
 		t.Fatal(err)
 	}

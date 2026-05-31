@@ -21,6 +21,11 @@ func TestCd(t *testing.T) {
 
 		wsName := "test12"
 
+		err := workspace.CreateWorkspaceRoot(workspacesDir, config)
+		if err != nil {
+			t.Fatalf("CreateWorkspaceRoot: %v", err)
+		}
+
 		ws, err := workspace.CreateWorkspace(wsName, config)
 		if err != nil {
 			t.Fatalf("CreateWorkspace: %v", err)

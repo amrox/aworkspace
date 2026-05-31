@@ -26,16 +26,29 @@ func createTestRepo(t *testing.T) string {
 func createTestWorkspace(t *testing.T, name string) (Workspace, Config) {
 	t.Helper()
 
+	wsDir := t.TempDir()
+
 	config := Config{
-		WorkspacesDir:  t.TempDir(),
+		WorkspacesDir:  wsDir,
 		BaresDir:       t.TempDir(),
 		WorktreeSubdir: "code",
 		BranchPrefix:   "ws/",
 	}
 
+	err := CreateWorkspaceRoot(wsDir, config)
+	if err != nil {
+		t.Fatalf("CreateWorkspaceRoot: %v", err)
+	}
+
 	ws, err := CreateWorkspace(name, config)
 	if err != nil {
 		t.Fatalf("CreateWorkspace: %v", err)
+	}
+
+	// Load to pick up root metadata
+	ws, err = LoadWorkspace(ws.Path)
+	if err != nil {
+		t.Fatalf("LoadWorkspace: %v", err)
 	}
 
 	return ws, config
