@@ -195,7 +195,7 @@ func ListWorkspaces(config Config) ([]Workspace, error) {
 			wsPath := filepath.Join(config.WorkspacesDir, e.Name())
 			ws, err := LoadWorkspace(wsPath)
 			if err != nil {
-				LogWarning("Could not load workspace at: %v\n", wsPath)
+				LogWarning("Could not load workspace at %v\n-> %v\n", wsPath, err)
 			} else {
 				workspaces = append(workspaces, ws)
 			}
