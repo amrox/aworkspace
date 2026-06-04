@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -17,7 +18,7 @@ func createTestRepo(t *testing.T) string {
 	t.Helper()
 
 	dir := t.TempDir()
-	exec.Command("git", "-C", dir, "init").Run()
+	exec.Command("git", "-C", dir, "init", "-b", "main").Run()
 	exec.Command("git", "-C", dir, "commit", "--allow-empty", "-m", "init").Run()
 
 	return dir
@@ -101,9 +102,9 @@ func TestAddRepoIntegration(t *testing.T) {
 		remoteRepo := createTestRepo(t)
 
 		// pre-add bare clone
-		_, err := cloneBareRepo(remoteRepo, config)
+		_, err := ensureBareRepo(remoteRepo, config)
 		if err != nil {
-			t.Fatalf("cloneBareRepo: %v", err)
+			t.Fatalf("ensureBareRepo: %v", err)
 		}
 
 		err = ws.AddRepo(remoteRepo, "", config)
@@ -145,7 +146,7 @@ func TestAddRepoIntegration(t *testing.T) {
 		remoteRepo := createTestRepo(t)
 
 		// pre-add bare clone
-		localBare, err := cloneBareRepo(remoteRepo, config)
+		localBare, err := ensureBareRepo(remoteRepo, config)
 
 		// create a branch matching our ws branch
 		err = exec.Command("git", "-C", localBare, "branch", defaultBranchName(ws, config)).Run()
@@ -181,7 +182,7 @@ func TestAddRepoIntegration(t *testing.T) {
 		remoteRepo := createTestRepo(t)
 
 		// pre-add bare clone
-		localBare, err := cloneBareRepo(remoteRepo, config)
+		localBare, err := ensureBareRepo(remoteRepo, config)
 
 		// create a worktree with branch matching our ws branch
 		worktreeDest := t.TempDir()
@@ -193,6 +194,100 @@ func TestAddRepoIntegration(t *testing.T) {
 		err = ws.AddRepo(remoteRepo, "", config)
 		if err == nil {
 			t.Fatalf("AddRepo: expected error, got <nil>")
+		}
+	})
+
+	t.Run("ensureBareRepo set refspec", func(t *testing.T) {
+		remoteRepo := createTestRepo(t)
+		config := Config{
+			BaresDir: t.TempDir(),
+		}
+
+		barePath, err := ensureBareRepo(remoteRepo, config)
+		if err != nil {
+			t.Fatalf("ensureBareRepo: %v", err)
+		}
+
+		out, err := exec.Command("git", "-C", barePath, "config", "--get", "remote.origin.fetch").Output()
+		if err != nil {
+			t.Fatalf("git config: %v", err)
+		}
+		got := strings.TrimSpace(string(out))
+		want := "+refs/heads/*:refs/remotes/origin/*"
+		if got != want {
+			t.Fatalf("refspace = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("ensureBareRepo idempotent", func(t *testing.T) {
+		remoteRepo := createTestRepo(t)
+		config := Config{
+			BaresDir: t.TempDir(),
+		}
+
+		barePath1, err := ensureBareRepo(remoteRepo, config)
+		if err != nil {
+			t.Fatalf("first call: %v", err)
+		}
+
+		barePath2, err := ensureBareRepo(remoteRepo, config)
+		if err != nil {
+			t.Fatalf("second call: %v", err)
+		}
+
+		if barePath1 != barePath2 {
+			t.Fatalf("paths differ: %q vs %q", barePath1, barePath2)
+		}
+	})
+
+	t.Run("ensureBareRepo fixes wrong refspec", func(t *testing.T) {
+		remoteRepo := createTestRepo(t)
+		config := Config{
+			BaresDir: t.TempDir(),
+		}
+
+		barePath, err := ensureBareRepo(remoteRepo, config)
+		if err != nil {
+			t.Fatalf("ensureBareRepo: %v", err)
+		}
+
+		// sabotage the refspec
+		exec.Command("git", "-C", barePath, "config", "remote.origin.fetch", "+refs/heads/*:refs/heads/*").Run()
+
+		// re-ensure should fix it
+		_, err = ensureBareRepo(remoteRepo, config)
+		if err != nil {
+			t.Fatalf("re-ensure: %v", err)
+		}
+
+		out, _ := exec.Command("git", "-C", barePath, "config", "--get", "remote.origin.fetch").Output()
+		got := strings.TrimSpace(string(out))
+		want := "+refs/heads/*:refs/remotes/origin/*"
+		if got != want {
+			t.Fatalf("refspec = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("fetch after refspec fix creates remote tracking refs", func(t *testing.T) {
+		remoteRepo := createTestRepo(t)
+		config := Config{
+			BaresDir: t.TempDir(),
+		}
+
+		barePath, err := ensureBareRepo(remoteRepo, config)
+		if err != nil {
+			t.Fatalf("ensureBareRepo: %v", err)
+		}
+
+		err = exec.Command("git", "-C", barePath, "fetch", "origin").Run()
+		if err != nil {
+			t.Fatalf("fetch: %v", err)
+		}
+
+		// verify origin/master or origin/main exists
+		err = exec.Command("git", "-C", barePath, "rev-parse", "--verify", "refs/remotes/origin/main").Run()
+		if err != nil {
+			t.Fatalf("remote tracking ref not found: %v", err)
 		}
 	})
 }

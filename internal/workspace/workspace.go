@@ -221,7 +221,7 @@ func (ws *Workspace) AddRepo(repoURL string, branch string, config Config) error
 		return err
 	}
 
-	bareRepoPath, err := cloneBareRepo(repoURL, config)
+	bareRepoPath, err := ensureBareRepo(repoURL, config)
 	if err != nil {
 		return err
 	}

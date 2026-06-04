@@ -61,7 +61,7 @@ func execGitCommand(config Config, args ...string) error {
 	return execCommand(git, args...)
 }
 
-func cloneBareRepo(repoURL string, config Config) (string, error) {
+func ensureBareRepo(repoURL string, config Config) (string, error) {
 
 	repo, err := parseRepoURL(repoURL)
 	if err != nil {
@@ -71,14 +71,22 @@ func cloneBareRepo(repoURL string, config Config) (string, error) {
 	destPath := repo.bareRepoPath(config)
 	if _, err := os.Stat(destPath); err == nil {
 		Log(LogLevelNormal, "Using existing bare repo at: %v\n", destPath)
-		return destPath, nil
+	} else {
+		Log(LogLevelNormal, "Cloning bare repo to: %v\n", destPath)
+		err = execGitCommand(config, "clone", "--bare", repoURL, destPath)
+		if err != nil {
+			return "", err
+		}
 	}
 
-	Log(LogLevelNormal, "Cloning bare repo to: %v\n", destPath)
-	err = execGitCommand(config, "clone", "--bare", repoURL, destPath)
+	// set fetch refspec
+	err = execGitCommand(config,
+		"-C", destPath, "config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*")
 	if err != nil {
+		// TODO: remove clone?
 		return "", err
 	}
+
 	return destPath, nil
 }
 
