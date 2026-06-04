@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -69,16 +70,27 @@ func cloneBareRepo(repoURL string, config Config) (string, error) {
 	}
 
 	destPath := repo.bareRepoPath(config)
-	if _, err := os.Stat(destPath); err == nil {
+	cloneState := BareRepoClone(repoURL, destPath, config)
+	pass, err := cloneState.Check()
+	if err != nil {
+		return "", err
+	}
+	if pass {
 		Log(LogLevelNormal, "Using existing bare repo at: %v\n", destPath)
 		return destPath, nil
 	}
 
 	Log(LogLevelNormal, "Cloning bare repo to: %v\n", destPath)
-	err = execGitCommand(config, "clone", "--bare", repoURL, destPath)
+	err = cloneState.Apply()
 	if err != nil {
 		return "", err
 	}
+
+	err = BareRepoRefspec(destPath, config).Reconcile(false)
+	if err != nil {
+		return "", err
+	}
+
 	return destPath, nil
 }
 
@@ -87,4 +99,44 @@ func addWorktree(bareRepoPath string, worktreeDest string, branch string, config
 	Log(LogLevelNormal, "Creating worktree: %v branch: %v\n", worktreeDest, branch)
 
 	return execGitCommand(config, "-C", bareRepoPath, "worktree", "add", worktreeDest, "-B", branch)
+}
+
+func BareRepoClone(repoURL string, bareRepoPath string, config Config) DesiredState {
+	check := func() (bool, error) {
+		_, err := os.Stat(bareRepoPath)
+		return err == nil, nil
+	}
+
+	apply := func () error  {
+		return execGitCommand(config, "clone", "--bare", repoURL, bareRepoPath)
+	}
+
+	return DesiredState{
+		Name:  "bare repo clone",
+		Check: check,
+		Apply: apply,
+	}
+}
+
+func BareRepoRefspec(bareRepoPath string, config Config) DesiredState {
+
+	remoteFetchVal := "+refs/heads/*:refs/remotes/origin/*"
+
+	check := func() (bool, error) {
+		return commandOutputCheck(
+			exec.Command("git", "-C", bareRepoPath, "config", "--get", "remote.origin.fetch"),
+			remoteFetchVal)
+	}
+
+	apply := func() error {
+		return execGitCommand(
+			config, "-C", bareRepoPath, "config", "remote.origin.fetch",
+			remoteFetchVal)
+	}
+
+	return DesiredState{
+		Name:  "bare repo refspec",
+		Check: check,
+		Apply: apply,
+	}
 }

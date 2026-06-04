@@ -1,9 +1,13 @@
 package workspace
 
 import (
+	"bytes"
 	"errors"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/pelletier/go-toml/v2"
 )
@@ -109,3 +113,39 @@ type Repo struct {
 
 	Url string
 }
+
+type DesiredState struct {
+	Name string
+	Check func() (bool, error)
+	Apply func() error
+}
+
+func (ds DesiredState) Reconcile(dryRun bool) error {
+		pass, err := ds.Check()
+		if err != nil {
+			return err
+		}
+		if !pass {
+			if !dryRun {
+				return ds.Apply()
+			}
+		}
+		return nil
+}
+
+func commandOutputCheck(cmd *exec.Cmd, output string) (bool, error) {
+	var buf bytes.Buffer
+	var w io.Writer = &buf
+	cmd.Stdout = w
+	cmd.Stderr = w
+	err := cmd.Run()
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		// command ran, non-zero exit code
+		return false, nil
+	} else if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(buf.String()) == output, nil
+}
+
