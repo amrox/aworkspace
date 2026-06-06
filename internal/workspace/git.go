@@ -51,7 +51,7 @@ func (r Repo) bareRepoPath(config Config) string {
 	return filepath.Join(config.BaresDir, subPath)
 }
 
-func execGitCommand(config Config, args ...string) error {
+func execGitCommand(config Config, args ...string) (string, error) {
 
 	git := "git"
 	if config.Git.Path != "" {
@@ -73,26 +73,66 @@ func ensureBareRepo(repoURL string, config Config) (string, error) {
 		Log(LogLevelNormal, "Using existing bare repo at: %v\n", destPath)
 	} else {
 		Log(LogLevelNormal, "Cloning bare repo to: %v\n", destPath)
-		err = execGitCommand(config, "clone", "--bare", repoURL, destPath)
+		_, err = execGitCommand(config, "clone", "--bare", repoURL, destPath)
 		if err != nil {
 			return "", err
 		}
 	}
 
-	// set fetch refspec
-	err = execGitCommand(config,
-		"-C", destPath, "config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*")
+	// TODO: remove clone on error?
+
+	_, err = execGitCommand(config, "-C", destPath,
+		"config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*")
 	if err != nil {
-		// TODO: remove clone?
+		return "", err
+	}
+
+	_, err = execGitCommand(config, "-C", destPath,
+		"fetch", "origin")
+	if err != nil {
+		return "", err
+	}
+
+	_, err = execGitCommand(config, "-C", destPath,
+		"remote", "set-head", "origin", "--auto")
+	if err != nil {
 		return "", err
 	}
 
 	return destPath, nil
 }
 
+func getDefaultBranch(bareRepoPath string, config Config) (string, error) {
+
+	out, err := execGitCommand(config, "-C", bareRepoPath,
+		"symbolic-ref", "refs/remotes/origin/HEAD")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
+
 func addWorktree(bareRepoPath string, worktreeDest string, branch string, config Config) error {
 
 	Log(LogLevelNormal, "Creating worktree: %v branch: %v\n", worktreeDest, branch)
 
-	return execGitCommand(config, "-C", bareRepoPath, "worktree", "add", worktreeDest, "-B", branch)
+	defaultBranch, err := getDefaultBranch(bareRepoPath, config)
+	if err != nil {
+		return err
+	}
+
+	_, err = execGitCommand(config, "-C", bareRepoPath,
+		"rev-parse", "--verify", branch)
+
+	if err != nil {
+		// branch does not exist, create with tracking
+		_, err = execGitCommand(config, "-C", bareRepoPath,
+			"worktree", "add", worktreeDest, "-b", branch, defaultBranch)
+		return err
+	}
+
+	// branch exists, check out
+	_, err = execGitCommand(config, "-C", bareRepoPath,
+		"worktree", "add", worktreeDest, branch)
+	return err
 }

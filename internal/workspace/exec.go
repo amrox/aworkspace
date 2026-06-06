@@ -47,7 +47,7 @@ func (pw *prefixWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-func execCommand(path string, args ...string) error {
+func execCommand(path string, args ...string) (string, error) {
 
 	var buf bytes.Buffer
 	var w io.Writer = &buf
@@ -69,8 +69,8 @@ func execCommand(path string, args ...string) error {
 	cmd.Stderr = w
 	err := cmd.Run()
 	if err != nil {
-		return fmt.Errorf("subcommand failed: %q: %w", buf.String(), err)
+		return "", fmt.Errorf("subcommand failed: %q: %w", buf.String(), err)
 	}
-	return nil
+	return buf.String(), nil
 }
 
