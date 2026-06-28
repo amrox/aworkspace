@@ -23,8 +23,8 @@ aworkspace uses **git worktrees** to create isolated working directories for eac
     WORKSPACE.md                   # Goals, context, notes
     CLAUDE.md                      # Agent instructions
     code/
-      repo-a/                      # Worktree (branch: ws/my-feature)
-      repo-b/                      # Worktree (branch: ws/my-feature)
+      repo-a/                      # Worktree (branch: my-feature)
+      repo-b/                      # Worktree (branch: my-feature)
 ```
 
 ## Installation
@@ -83,7 +83,7 @@ Show details about a workspace (repos and their URLs). Infers workspace from cur
 
 ### `aworkspace add-repo <url>`
 
-Add a repository to the current workspace. Creates a bare clone (if needed) and a worktree with a `ws/<workspace-name>` branch.
+Add a repository to the current workspace. Creates a bare clone (if needed) and a worktree on a branch named after the workspace (e.g. workspace `my-feature` → branch `my-feature`). Prints the branch name and whether it was created or reused.
 
 **Examples:**
 ```bash
@@ -150,7 +150,7 @@ Config file: `~/.config/aworkspace/config.toml`
 workspaces_dir = "~/Workspaces"
 bares_dir = "~/.local/share/aworkspace/repos"
 workspace_worktree_subdir = "code"
-branch_prefix = "ws/"
+branch_prefix = ""
 
 [git]
 path = "/usr/local/bin/git"  # custom git binary (default: "git")
@@ -161,7 +161,7 @@ path = "/usr/local/bin/git"  # custom git binary (default: "git")
 - `workspaces_dir` — Where workspaces are created (default: `~/Workspaces`)
 - `bares_dir` — Where bare clones are stored (default: `~/.local/share/aworkspace/repos`)
 - `workspace_worktree_subdir` — Subdirectory within workspace for worktrees (default: `"code"`)
-- `branch_prefix` — Prefix for auto-generated workspace branches (default: `"ws/"`)
+- `branch_prefix` — Optional prefix for workspace branches (default: `""` — branch name = workspace name)
 
 ### PLANNED: Bookmarks
 
@@ -188,19 +188,31 @@ aworkspace add-repo work:gitlab-runners  # -> git@gitlab.company.com:team-infra/
 
 ## Branch Naming
 
-By default, aworkspace creates branches with the `ws/` prefix (e.g., workspace `my-feature` → branch `ws/my-feature`). You can configure a different prefix or use no prefix:
+By default, the branch is **named after the workspace** — the same name in every repo of the workspace, with no prefix. Workspace `my-feature` → branch `my-feature`.
+
+The branch name describes *the work*, not the plumbing. Because the local branch name matches the remote name, there's no translation when you push or open a PR — `git push` just works, and the base branch (what you forked from) is recorded as metadata, not baked into the name.
+
+**Creating or reusing a branch** (aworkspace always tells you which):
+- Branch doesn't exist → created from the base branch.
+- Branch exists but isn't checked out elsewhere → reused (the worktree attaches to it).
+- Branch exists and is already checked out in another worktree → **error.** This is an exceptional case (workspace names are unique and teardown is clean, so it usually means a stale worktree left behind). aworkspace won't silently invent a different branch name; it tells you which worktree holds the branch. Pass an explicit branch (`add-repo <url> <branch>`) or clean up with `doctor`/`prune`.
+
+```
+workspace 'fix-auth'
+  api     → branch fix-auth (new, from main)
+  shared  → branch fix-auth (reusing existing)
+```
+
+**Optional prefix.** If you want workspace branches namespaced (e.g. to identify them in CI or match a team convention), set a prefix:
 
 ```toml
 # config.toml
-branch_prefix = "ws/"     # default
-# branch_prefix = ""      # no prefix: workspace name = branch name
+branch_prefix = ""        # default: branch name = workspace name
+# branch_prefix = "ws/"   # namespaced: my-feature → ws/my-feature
 # branch_prefix = "aw-"   # flat prefix: my-feature → aw-my-feature
 ```
 
-This is useful for:
-- **Organization** — keeping workspace branches separate from other branch types
-- **Tooling integration** — CI/scripts can identify workspace branches by prefix
-- **Team conventions** — matching existing naming schemes
+Note that any prefix reintroduces a local/remote name difference, so leaving it empty is recommended unless you specifically need the namespace.
 
 ## Workspace Structure
 

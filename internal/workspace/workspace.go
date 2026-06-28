@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/pelletier/go-toml/v2"
@@ -111,9 +112,23 @@ func NewWorkspace(path string) Workspace {
 	}
 }
 
+var workspaceNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
+
+func validateWorkspaceName(name string) error {
+
+	if !workspaceNameRe.MatchString(name) {
+		return fmt.Errorf("invalid workspace name - must begin with alphanumeric, and contain only alphanumeric, - and _")
+	}
+	return nil
+}
+
 func CreateWorkspace(name string, config Config) (Workspace, error) {
 
-	var err error
+	err := validateWorkspaceName(name)
+	if err != nil {
+		return Workspace{}, err
+	}
+
 	wsPath := filepath.Join(config.WorkspacesDir, name)
 
 	_, err = os.Stat(wsPath)
@@ -122,6 +137,16 @@ func CreateWorkspace(name string, config Config) (Workspace, error) {
 	}
 	if !os.IsNotExist(err) {
 		return Workspace{}, err
+	}
+
+	allExisting, err := existingWorkspaceNames(config)
+	if err != nil {
+		return Workspace{}, err
+	}
+	for _, existing := range allExisting {
+		if strings.EqualFold(name, existing) {
+			return Workspace{}, fmt.Errorf("could not create workspace %q: workspace name collision with %q", name, existing)
+		}
 	}
 
 	success := false
@@ -178,7 +203,7 @@ func LoadWorkspace(wsPath string) (Workspace, error) {
 	return ws, nil
 }
 
-func ListWorkspaces(config Config) ([]Workspace, error) {
+func existingWorkspaceNames(config Config) ([]string, error) {
 
 	entries, err := os.ReadDir(config.WorkspacesDir)
 	if os.IsNotExist(err) {
@@ -188,17 +213,30 @@ func ListWorkspaces(config Config) ([]Workspace, error) {
 		return nil, err
 	}
 
-	var workspaces []Workspace
-
+	var names []string
 	for _, e := range entries {
 		if e.IsDir() && !strings.HasPrefix(e.Name(), ".") {
-			wsPath := filepath.Join(config.WorkspacesDir, e.Name())
-			ws, err := LoadWorkspace(wsPath)
-			if err != nil {
-				LogWarning("Could not load workspace at %v\n-> %v\n", wsPath, err)
-			} else {
-				workspaces = append(workspaces, ws)
-			}
+			names = append(names, e.Name())
+		}
+	}
+	return names, nil
+}
+
+func ListWorkspaces(config Config) ([]Workspace, error) {
+
+	names, err := existingWorkspaceNames(config)
+	if err != nil {
+		return []Workspace{}, err
+	}
+
+	var workspaces []Workspace
+	for _, e := range names {
+		wsPath := filepath.Join(config.WorkspacesDir, e)
+		ws, err := LoadWorkspace(wsPath)
+		if err != nil {
+			LogWarning("Could not load workspace at %v\n-> %v\n", wsPath, err)
+		} else {
+			workspaces = append(workspaces, ws)
 		}
 	}
 	return workspaces, nil

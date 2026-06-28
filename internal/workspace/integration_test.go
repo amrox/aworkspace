@@ -33,7 +33,7 @@ func createTestWorkspace(t *testing.T, name string) (Workspace, Config) {
 		WorkspacesDir:  wsDir,
 		BaresDir:       t.TempDir(),
 		WorktreeSubdir: "code",
-		BranchPrefix:   "ws/",
+		BranchPrefix:   "", // docs: default is no prefix (branch name = workspace name)
 	}
 
 	err := CreateWorkspaceRoot(wsDir, config)
@@ -175,7 +175,12 @@ func TestAddRepoIntegration(t *testing.T) {
 		}
 	})
 
-	t.Run("failure - existing worktree", func(t *testing.T) {
+	t.Run("errors when branch is checked out in another worktree", func(t *testing.T) {
+
+		// Per docs: when the workspace branch already exists AND is checked out in
+		// another worktree (git forbids sharing a branch across worktrees), AddRepo
+		// does NOT auto-rename — it errors. This is an exceptional, usually-dirty
+		// state; aworkspace shouts rather than silently inventing a new branch name.
 
 		ws, config := createTestWorkspace(t, "test-ws")
 
@@ -183,17 +188,28 @@ func TestAddRepoIntegration(t *testing.T) {
 
 		// pre-add bare clone
 		localBare, err := ensureBareRepo(remoteRepo, config)
+		if err != nil {
+			t.Fatalf("ensureBareRepo: %v", err)
+		}
 
-		// create a worktree with branch matching our ws branch
-		worktreeDest := t.TempDir()
-		err = exec.Command("git", "-C", localBare, "worktree", "add", worktreeDest, "-B", defaultBranchName(ws, config)).Run()
+		// occupy the workspace branch with a worktree elsewhere so git refuses to reuse it
+		branch := defaultBranchName(ws, config)
+		occupied := t.TempDir()
+		err = exec.Command("git", "-C", localBare, "worktree", "add", occupied, "-B", branch).Run()
 		if err != nil {
 			t.Fatalf("git worktree creation failed: %v", err)
 		}
 
 		err = ws.AddRepo(remoteRepo, "", config)
 		if err == nil {
-			t.Fatalf("AddRepo: expected error, got <nil>")
+			t.Fatalf("AddRepo: expected error (branch %q checked out elsewhere), got <nil>", branch)
+		}
+
+		// and it must not leave a half-created worktree behind
+		repoName := filepath.Base(remoteRepo)
+		worktreePath := filepath.Join(ws.Path, config.WorktreeSubdir, repoName)
+		if _, statErr := os.Stat(worktreePath); statErr == nil {
+			t.Errorf("AddRepo left a worktree at %q after erroring", worktreePath)
 		}
 	})
 

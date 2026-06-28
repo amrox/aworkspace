@@ -130,6 +130,65 @@ func TestCreateWorkspace(t *testing.T) {
 	})
 }
 
+// TestCreateWorkspaceNameValidation asserts the name-validation rule from the
+// docs. Workspaces are meant to be created through the tool, so the name is
+// validated at creation. Because the workspace name becomes the branch name
+// 1:1, the rule is the "GitHub-spirit" branch-safe set:
+//
+//	^[A-Za-z0-9][A-Za-z0-9_-]*$   (mixed case OK, ASCII only, no spaces, no '.')
+//
+// and identity/uniqueness is compared case-insensitively.
+func TestCreateWorkspaceNameValidation(t *testing.T) {
+
+	t.Run("accepts valid names", func(t *testing.T) {
+		valid := []string{"MyFeature", "JIRA-1234", "my-feature", "fix_login", "a1"}
+		for _, name := range valid {
+			t.Run(name, func(t *testing.T) {
+				config := Config{WorkspacesDir: t.TempDir()}
+				if _, err := CreateWorkspace(name, config); err != nil {
+					t.Errorf("CreateWorkspace(%q): expected success, got error: %v", name, err)
+				}
+			})
+		}
+	})
+
+	t.Run("rejects invalid names", func(t *testing.T) {
+		invalid := []struct {
+			name   string
+			reason string
+		}{
+			{"my feature", "contains a space"},
+			{"项目", "non-ASCII"},
+			{"-leading", "leading hyphen"},
+			{"has.dot", "contains '.' (not safe for git refs)"},
+		}
+		for _, tc := range invalid {
+			t.Run(tc.reason, func(t *testing.T) {
+				config := Config{WorkspacesDir: t.TempDir()}
+				if _, err := CreateWorkspace(tc.name, config); err == nil {
+					t.Errorf("CreateWorkspace(%q): expected error (%s), got <nil>", tc.name, tc.reason)
+				}
+			})
+		}
+	})
+
+	t.Run("rejects case-insensitive duplicate", func(t *testing.T) {
+		// Create "MyFeature", then "myfeature" must be rejected — the tool should
+		// enforce case-insensitive uniqueness (GitHub's model), not merely rely on
+		// the filesystem happening to be case-insensitive.
+		config := Config{WorkspacesDir: t.TempDir()}
+
+		if _, err := CreateWorkspace("MyFeature", config); err != nil {
+			t.Fatalf("CreateWorkspace(%q): %v", "MyFeature", err)
+		}
+
+		if _, err := CreateWorkspace("myfeature", config); err == nil {
+			t.Errorf("CreateWorkspace(%q): expected rejection (case-insensitive duplicate of %q), got <nil>",
+				"myfeature", "MyFeature")
+		}
+	})
+}
+
 func TestLoadWorkspace(t *testing.T) {
 	t.Run("load workspace dir does not exist", func(t *testing.T) {
 

@@ -2,15 +2,35 @@
 
 ## Design Notes
 
-**Branch prefix:** Default is `"ws/"` (e.g., workspace `my-feature` creates branches `ws/my-feature`). This prefix:
-- Clearly marks workspace-managed branches as plumbing (not real topic branches)
-- Avoids locking the repo's default branch across multiple workspaces
-- Enables clean lifecycle operations (`rm` can safely delete `ws/*` branches)
-- Is configurable via `branch_prefix` in config
+**Branch naming:** The default branch is the **(slugified) workspace name**, the same name in every repo of the workspace — no prefix. Workspace `my-feature` → branch `my-feature`.
 
-**Branch collision handling:** If a `ws/<name>` branch already exists or is already checked out, `add-repo` will fail with a clear error. No auto-suffixing or magic renaming. This should be rare since `ws/` is aworkspace's namespace. If it happens, it usually means a workspace was removed without cleanup (which `doctor` would flag).
+Guiding principle: *the branch name describes the work, not the plumbing.* The earlier `ws/<workspace>` scheme was called "plumbing," but the user sees it everywhere (push, PRs, prompts) — so it isn't plumbing, it's porcelain. Two concrete wins from dropping the prefix:
 
-**Base branch tracking:** Each repo in a workspace can specify a `base_branch` — the upstream branch the workspace checkout is based on. Stored in `.aworkspace.toml` per-repo:
+- **Local name = remote name.** No translation when you push or open a PR, no `ws/foo`→`feature/login` mental mapping. This was the single most surprising thing about the prefix scheme.
+- **Bookkeeping moves to metadata, not the name.** "Which branches belong to this workspace?" is answered by `.aworkspace.toml` / the workspace dir, not by a `grep ws/`. The branch name is freed to be natural. (Cost: discoverability/cleanup now depend on the metadata store being trustworthy — `doctor` reconciles metadata vs. actual worktrees/branches.)
+
+A `branch_prefix` config (default `""`) remains for users who deliberately want namespaced/throwaway branches.
+
+**Collision handling** (least-surprising order — never silent):
+1. Branch doesn't exist → create it from the base branch.
+2. Branch exists and isn't checked out in any worktree → **reuse it** (attach the worktree). Silently forking to `my-feature-2` when `my-feature` is sitting right there is the surprising move.
+3. Branch exists **and** is checked out in another worktree (git forbids sharing) → **error, don't auto-rename.**
+
+Why error rather than auto-disambiguate (e.g. `my-feature-2`): with unique workspace names and clean teardown, this collision is *exceptional* — it almost always means a dirty state (a workspace removed without cleanup left a stale worktree holding the branch). Silently minting a `-2` branch reintroduces exactly the surprising, non-`local==remote` name we dropped `ws/` to avoid, and it produces litter. So we shout instead:
+
+- Fail with a clear message naming the worktree that holds the branch, e.g. `branch 'my-feature' is already checked out at <path>; run 'aworkspace doctor' or pass an explicit branch`.
+- The user's escape hatches are already there: `add-repo <url> <branch>` to pick a different name, or `doctor`/`prune` to clean up the stale holder.
+- (An earlier draft proposed a `<workspace>+<repo>` suffix. Dropped: the suffix is constant per (workspace, repo) so it's idempotent — it can't disambiguate a *second* collision, and it can't disambiguate two worktrees of the *same* repo at all.)
+
+**Visibility is the real least-surprise lever.** `new`/`add-repo` print exactly what they did, e.g.:
+
+```
+workspace 'fix-auth'
+  api     → branch fix-auth (new, from main)
+  shared  → branch fix-auth (reusing existing)
+```
+
+**Base branch:** Each repo can specify a `base_branch` — what the workspace branch forks from. Stored in `.aworkspace.toml` per-repo (metadata, **not** in the branch name):
 
 ```toml
 [repos.my-service]
@@ -18,11 +38,11 @@ url = "git@github.com:org/my-service.git"
 base_branch = "main"
 ```
 
-- `add-repo` creates `ws/<workspace-name>` locally, starts it from `origin/<base_branch>`: `git worktree add <dest> -B ws/foo origin/main`
-- `add-repo` also sets git upstream tracking: `git branch --set-upstream-to=origin/<base_branch> ws/<workspace>`. This gives users branch-relative info (ahead/behind) and shell prompts that show tracking (e.g. starship) display `ws/doc-updates:main` for free — no custom tooling needed.
-- If omitted at add-time, defaults to the remote's HEAD (the repo's default branch) and is stored explicitly so the metadata is self-describing
-- `update` (0.2) will fetch and rebase/merge from `origin/<base_branch>`
-- Useful for reference repos where you want to pin to `main` even if the repo defaults to `dev`
+- `add-repo` starts the branch from `origin/<base_branch>`: `git worktree add <dest> -b my-feature origin/main` (case 1 above).
+- Normal git upstream applies — once pushed, `my-feature` tracks `origin/my-feature` (set on first push). We do **not** set upstream to `origin/<base_branch>`: that would make `git push` target the base branch — exactly the surprising indirection we're removing. Ahead/behind-of-base is computed explicitly from metadata by `status`/`update` instead.
+- If omitted, defaults to the remote's HEAD (the repo's default branch) and is stored explicitly so the metadata is self-describing.
+- `update` (0.2) fetches and rebases/merges from `origin/<base_branch>`.
+- Useful for reference repos where you want to pin to `main` even if the repo defaults to `dev`.
 
 **Open question (0.1 decision required):** Workspace context file naming. Options:
 - `WORKSPACE.md` — Avoids collision with repo READMEs, clear purpose. Current leaning.
@@ -181,7 +201,7 @@ Goal: Get the basic workspace management working. Create, list, and manage works
   - Handle bare clone creation
   - Create worktree with branch
   - Update `.aworkspace.toml` with repo metadata
-  - Support branch naming with configurable prefix
+  - Branch = workspace name by default (no prefix); optional configurable prefix; collision handling per Design Notes
   - **Support multiple different repos per workspace**
 - [x] **`-C <path>` flag** — Override working directory for commands that depend on cwd (`show`, `add-repo`)
 - [x] **Basic tests** — Unit tests for workspace discovery, config loading, path handling
