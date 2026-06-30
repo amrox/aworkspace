@@ -124,9 +124,9 @@ func TestDefaultConfig(t *testing.T) {
 		t.Errorf("BaresDir = %v, want %v", config.BaresDir, expectedReposDir)
 	}
 
-	// Check BranchPrefix
-	if config.BranchPrefix != "ws/" {
-		t.Errorf("BranchPrefix = %v, want 'ws/'", config.BranchPrefix)
+	// Check BranchPrefix — per docs the default is empty (branch name = workspace name)
+	if config.BranchPrefix != "" {
+		t.Errorf("BranchPrefix = %q, want \"\" (branch name = workspace name)", config.BranchPrefix)
 	}
 }
 

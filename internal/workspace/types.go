@@ -59,7 +59,7 @@ func DefaultConfig() Config {
 		WorkspacesDir:  filepath.Join(homeDir(), "Workspaces"),
 		BaresDir:       DefaultBaresPath(),
 		WorktreeSubdir: "code",
-		BranchPrefix:   "ws/",
+		BranchPrefix:   "",
 	}
 }
 
