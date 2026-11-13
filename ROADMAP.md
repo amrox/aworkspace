@@ -2,7 +2,9 @@
 
 ## Design Notes
 
-**Branch naming:** The default branch is the **(slugified) workspace name**, the same name in every repo of the workspace — no prefix. Workspace `my-feature` → branch `my-feature`.
+**Branch naming:** The default branch is the **(slugified) workspace name**, the same name in every *edit* repo of the workspace — no prefix. Workspace `my-feature` → branch `my-feature`. (Reference repos get no branch at all — see "Checkout roles" below.)
+
+Precedent: this is git's own default. `git worktree add <path>` with no branch argument creates a branch named after the path's basename. We apply the same rule one level up — the workspace dir's basename names the branch.
 
 Guiding principle: *the branch name describes the work, not the plumbing.* The earlier `ws/<workspace>` scheme was called "plumbing," but the user sees it everywhere (push, PRs, prompts) — so it isn't plumbing, it's porcelain. Two concrete wins from dropping the prefix:
 
@@ -28,7 +30,10 @@ Why error rather than auto-disambiguate (e.g. `my-feature-2`): with unique works
 workspace 'fix-auth'
   api     → branch fix-auth (new, from main)
   shared  → branch fix-auth (reusing existing)
+  docs    → detached at origin/main (reference)
 ```
+
+The `reusing existing` line is the only guard against a generic workspace name (`test`, `wip`) silently picking up an unrelated branch of the same name, so this output is part of the design, not polish.
 
 **Base branch:** Each repo can specify a `base_branch` — what the workspace branch forks from. Stored in `.aworkspace.toml` per-repo (metadata, **not** in the branch name):
 
@@ -42,7 +47,7 @@ base_branch = "main"
 - Normal git upstream applies — once pushed, `my-feature` tracks `origin/my-feature` (set on first push). We do **not** set upstream to `origin/<base_branch>`: that would make `git push` target the base branch — exactly the surprising indirection we're removing. Ahead/behind-of-base is computed explicitly from metadata by `status`/`update` instead.
 - If omitted, defaults to the remote's HEAD (the repo's default branch) and is stored explicitly so the metadata is self-describing.
 - `update` (0.2) fetches and rebases/merges from `origin/<base_branch>`.
-- Useful for reference repos where you want to pin to `main` even if the repo defaults to `dev`.
+- For reference repos, `base_branch` is what the detached worktree is checked out at — e.g. pin to `main` even if the repo defaults to `dev`.
 
 **Open question (0.1 decision required):** Workspace context file naming. Options:
 - `WORKSPACE.md` — Avoids collision with repo READMEs, clear purpose. Current leaning.
@@ -63,7 +68,24 @@ This needs to be configurable:
 
 Without this, every agent session requires manual explanation of workspace isolation rules.
 
-**Checkout roles (edit vs reference):** Each repo checkout in a workspace could be tagged as either "edit" (actively being developed) or "reference" (read-only context for agents). For example, a workspace might have `my-service` as the edit target while `shared-lib` and `api-spec` are references. This distinction is purely advisory — it helps agents understand which code they should be modifying vs. just reading for context. Could be a field in `.aworkspace.toml` per-repo entry.
+**Checkout roles (edit vs reference):** Each repo checkout in a workspace could be tagged as either "edit" (actively being developed) or "reference" (read-only context for agents). For example, a workspace might have `my-service` as the edit target while `shared-lib` and `api-spec` are references. It helps agents understand which code they should be modifying vs. just reading for context. Stored as a per-repo field in `.aworkspace.toml` (default `edit`):
+
+```toml
+[repos.shared-lib]
+url = "git@github.com:org/shared-lib.git"
+base_branch = "main"
+role = "reference"
+```
+
+The role is advisory (nothing stops you editing a reference repo) with **one mechanical effect: reference repos are checked out detached, with no named branch** (decided).
+
+- `add-repo --reference` runs `git worktree add --detach <dest> origin/<base_branch>` (flag name tentative).
+- **Why:** a repo you only read doesn't need a `my-feature` branch — it's litter in the bare and noise in the forge if ever pushed. Detached also sidesteps collision handling entirely: any number of workspaces can sit detached at the same commit, so cases 1–3 above never arise for reference repos.
+- **Why not detached for edit repos too:** it trades a naming problem for a data-safety problem. Commits on a detached HEAD are only protected while the worktree exists, so archive's "committed work is safe on the kept branch" guarantee would break, `prune`'s `--branches` scan wouldn't see them, pushing needs `HEAD:refs/heads/<name>`, and prompts/tools show a SHA. Reference repos never commit, so none of those costs apply.
+- **Safety net for the exception:** if someone does commit in a reference repo, those commits are reachable from no ref. `archive` treats this as dirty (confirm / `--force`), same class as uncommitted changes. Detection: `git rev-list HEAD --not --branches --remotes --tags` non-empty.
+- **Promotion (reference → edit):** create the workspace branch at the current HEAD (`git switch -c <workspace-name>`) and flip `role`. Manual in 0.1; a command can come later if it's missed.
+- `update` (0.2) moves a reference repo by re-detaching at the freshly fetched `origin/<base_branch>` — no rebase/merge.
+- `status` reads the live HEAD for every repo rather than trusting a stored branch name, so a detached repo (or a renamed branch) reports correctly.
 
 **Worktree subdir scoping (and "the workspaces root" as a first-class entity):** The worktree subdir name (`worktree_subdir`, e.g. `code/`) should be **scoped to the workspaces root, not to global config read at per-workspace creation time.** The current flaw: the value is resolved from transient global config when each workspace is created, so one root accumulates workspaces stamped with whatever global config said on each creation day — producing intra-root heterogeneity (`A/code/`, `B/worktrees/`). The configurability isn't the problem; the scope and timing are. Fix with three-level resolution (like git config / mise):
 
@@ -101,22 +123,77 @@ A workspace is three materials with different reconstructibility, which dictates
 | Layer | Workspace content | Reconstructible? | Removed by |
 |---|---|---|---|
 | Container | Worktrees + working-tree changes (`code/`) | Mostly (remote + branch) | `rm` (default) |
-| Image | The **record**: `.aworkspace.toml`, `WORKSPACE.md`, notes/resources | No — irreplaceable | `rm --purge` |
+| Image | The **record**: `.aworkspace.toml`, `WORKSPACE.md`, notes/resources | No — irreplaceable | destroyer (`purge`/`delete`, deferred; manual `rm` of the archive in 0.1) |
 | Base layers | Shared **bare repos** (live outside the workspace) | Yes (re-clone) | `prune` only |
 
 Safety property: **no single-workspace command can ever delete shared state.** Bare repos are refcounted layers; only the explicit, global `prune` reclaims dangling ones.
 
 ### Command family (safe by default)
 
-- **`rm` = archive (default, safe).** Detaches worktrees (the container), keeps the record (the image), moves the workspace dir to `_archive/`. Never touches bare repos. This is the everyday, muscle-memory verb — destruction is opt-in.
-- **`rm --purge`** — also deletes the record. Irreversible.
-- **`prune`** — global GC of bare repos no workspace references. A separate operation, never a side effect of `rm` (see 0.2).
+- **`archive` (default, safe).** Detaches worktrees (the container), keeps the record (the image), moves the workspace dir to `_archive/`. Never deletes shared content. This is the everyday verb — it's named for what it *does* (the connotation matches the safe behavior), unlike `rm`, which over-promised destruction. (Earlier draft called this `rm`; renamed because `rm` reads as "destroy" while the default preserves.)
+- **The destroyer (`purge`/`delete`) is deferred past 0.1.** Archives are plain folders, so the v1 recourse for "I really want this gone" is a manual `rm -rf _archive/<name>`. A tool-provided destroyer can come later once we've felt whether it's missed; making it a *separate command* (not an `archive --purge` flag) means destruction requires typing a different, scarier word — consistent with "speed bump proportional to irreversibility." Name still open (`purge` vs `delete` vs `destroy`).
+- **`prune`** — global GC of bare repos no *live* workspace references. A separate operation, never a side effect of `archive` (see 0.2). Detects unpushed commits before deleting a bare (see "prune" below).
 
 Primary motivation for archive is **preserving the record/memory**. Resumability (re-create worktrees on the same branches, or `new --from` an archived workspace) is a secondary bonus that falls out of keeping `.aworkspace.toml` + final commit SHAs in the record.
+
+### archive: dirty detection & confirmation (decided)
+
+Under **A1** — archive never deletes shared *content* (branches/objects/the bare stay put; it only detaches each worktree, which updates that worktree's own registration) — archive can only ever destroy state that lives **only in the worktree**. So dirty detection reduces to one question per repo: are there **uncommitted or untracked** changes? Committed work — pushed or not — is safe on the kept branch, so unpushed commits are reported as FYI, never a gate. (Untracked is counted *after* the ignore rules, so `tmp/`/`secrets/` don't cry wolf.)
+
+**One exception — detached worktrees (reference repos).** "Safe on the kept branch" assumes a branch. A detached worktree has none, so commits made there exist only in the worktree's HEAD and are orphaned when it is detached. They count as dirty: `git rev-list HEAD --not --branches --remotes --tags` non-empty → confirm / `--force`. See "Checkout roles" in Design Notes.
+
+Confirmation falls out of "what gets destroyed":
+
+| `archive` | clean worktree | dirty (uncommitted/untracked) |
+|---|---|---|
+| behavior | proceed, print summary | confirm / `--force` |
+
+- Archive is friction-free only for a *clean* worktree; the dirty case has a real destructive edge, which is exactly where the confirm earns its keep.
+- **Never a hard block.** confirm/`--force` is a speed bump proportional to irreversibility, consistent with visibility-never-enforcement.
+- Dirty state is reported **per repo** (which repos, how many uncommitted/untracked), not a workspace-level boolean.
+
+**Target & cwd:**
+- `archive <name>` **requires the workspace name** — it never infers from the current directory. Inferring would mean standing inside the workspace being archived, which is exactly the unsafe case below.
+- `archive` **refuses when the invoking shell's cwd is at or under the target workspace dir** — the dir is renamed (and the worktree subdir deleted), so the cwd would be moved/deleted out from under the shell, leaving a half-dead state. Tells you to `cd` out first. Precedent: `git branch -d` refuses the checked-out branch; Postgres `DROP DATABASE` refuses the connected database.
+- The guard is **best-effort, not airtight**: it only inspects the invoking shell. Another terminal sitting inside the same workspace still gets its cwd pulled out from under it — "current workspace" is per-shell, not global state aworkspace tracks. Accepted tradeoff; the guard catches the common case (archiving the one you're standing in).
+
+**Library contract** (the CLI maps prompts onto this): a `Force` flag skips the guard; without it, archive-of-dirty returns a sentinel error the CLI turns into a confirmation prompt.
+
+### prune: unpushed-commit detection (decided)
+
+`prune` is where the unpushed-commit risk A1 deferred finally lands: **archive keeps branches in the bare, and prune deletes the bare** — so prune is the operation that can permanently destroy unpushed work. Detection therefore *must* live here; without it, A1's "unpushed is safe because we keep the branch" is a promise with no enforcement point.
+
+It's the same "does anything exist only here?" question as archive, one layer down:
+
+| Operation | Layer destroyed | "exists only here" = |
+|---|---|---|
+| `archive` | worktree (container) | uncommitted / untracked |
+| `prune` | bare (base layer) | **unpushed commits** |
+
+So prune gets archive's treatment, applied to the bare:
+- **Bare fully reconstructible** — every local branch tip is reachable from a remote-tracking ref → a re-clone gets it all back → **prune freely** (this is the whole point of bares being the reconstructible base layer).
+- **Bare holds unpushed commits** → **confirm / `--force`**, listing which branches carry them. Never a hard block, but the speed bump is mandatory because the loss is permanent.
+
+Detection is cheap and **offline** (no network): in the bare, `git rev-list --branches --not --remotes` yields every commit on a local branch not reachable from any remote-tracking ref. Non-empty → unpushed work exists; enumerate the branches for the warning. It uses the bare's *last-fetched* remote refs, which is the right call — prune shouldn't phone home.
+
+**Two stages, kept separate:**
+1. **Candidacy** — which bares have no *live* workspace reference (the GC roots). Archived workspaces do **not** grant immunity — the unpushed check is the real backstop, so a pushed (re-cloneable) bare is safe to prune regardless of archived references, and an unpushed one gets caught at the safety stage either way.
+2. **Safety** — of the candidates, which hold unpushed commits → confirm.
 
 ### Archive substrate: plain move-aside folder
 
 Archiving moves the workspace dir (minus dropped layers) to `_archive/` as a **plain folder of files**. Not a tarball (opaque — can't grep or `cd` into it), not git-baked (binaries bloat history; couples aworkspace to a VCS). If you want the archive in version control, that's the orthogonal VCS-tracking story below — your call, not aworkspace's.
+
+### Archive folder naming: `name@date` (decided)
+
+Archive-forever guarantees collisions: you can `new feature1`, archive it, then `new feature1` again (the name frees up once it leaves the live root). So archives are named **`<name>@<YYYY-MM-DD>`** — e.g. `_archive/feature1@2026-06-30`.
+
+- **Always dated, not just on collision.** The date is useful at a glance in `ls _archive/`, sorts re-archives of a name together chronologically, and avoids special-casing the first one.
+- **`@` delimiter** is unambiguous precisely because workspace names are validated `[A-Za-z0-9_-]` (no `@`), so it can never appear in a name. (`_`/`-` would blur the name/date boundary.)
+- **Same-day, same-name collisions** get a first-free counter: `feature1@2026-06-30`, `feature1@2026-06-30-2`, … (rare path; same terminating "increment to first free" loop as branch collisions).
+- **The folder name is never parsed** — frontmatter (`name`, `archived` date) is the authority and `reindex` reads *that*, not the folder. So the name only has to be *readable + unique on disk*; a manual `mv` of an archive breaks nothing. The folder date equals the frontmatter `archived` date (one timestamp).
+- **`Archive` returns the resolved path** so the CLI can report where it went and callers/tests don't have to recompute the date.
+- **Never overwrite or merge** into an existing archive dir — always land in a fresh, deconflicted path.
 
 ### Index: self-describing folders + regenerable ledger
 
@@ -177,7 +254,7 @@ Secrets not syncing is correct and desired, but it's a sharp edge on a fresh res
 
 ### Parked implementation TODOs
 
-- **Archived folder naming/deconfliction** — archive-forever guarantees eventual `feature1` collisions. Leaning `name@date` (e.g. `_archive/feature1@2026-05-02/`) with a same-day `-N` fallback; friendly name preserved in frontmatter. Doesn't affect the design.
+- **Archived folder naming/deconfliction** — **decided:** `name@date` with a same-day `-N` fallback; friendly name preserved in frontmatter. See "Archive folder naming" above.
 - `archive reindex` — rebuild `_archive/INDEX.md` from the folders.
 - Possible `archive clean` to bulk-prune old archives (but it's flat files — easy to do manually).
 - Possible `import-resource` using APFS `clonefile` for cheap CoW copies — only if aworkspace is ever the one doing the copying.
@@ -211,7 +288,8 @@ Goal: Get the basic workspace management working. Create, list, and manage works
 - [x] **`aworkspace cd <name>`** — Output path for shell integration
 - [x] **`aworkspace init <shell>`** — Shell integration setup (emits shell wrapper for `cd`)
 - [x] **Tab completion for `aworkspace cd`** — Complete workspace names; critical for usability of `cd`
-- [ ] **`aworkspace rm [workspace]`** — Safe-by-default archive (detach worktrees, keep the record, move to `_archive/`); `--purge` to destroy the record. See "Workspace Lifecycle" above.
+- [x] **`aworkspace archive [workspace]`** — Safe-by-default archive (detach worktrees, keep the record, move to `_archive/`). Dirty (uncommitted/untracked) worktrees need `--force`/confirm; clean ones go through silently. No tool-provided destroyer in 0.1 — manual `rm -rf _archive/<name>` is the recourse. See "Workspace Lifecycle" above.
+- [ ] **Checkout roles** — `role` field per repo (`edit` default, `reference`); `add-repo --reference` creates a detached worktree at `origin/<base_branch>` with no named branch. See "Checkout roles" in Design Notes.
 - [ ] **Better error messages** — User-friendly errors with suggestions
 
 ### Out of Scope for 0.1
@@ -228,10 +306,10 @@ Goal: Get the basic workspace management working. Create, list, and manage works
 
 - [ ] Shell completion (bash/zsh/fish)
 - [ ] Submodule support (with git-worktree-tools integration)
-- [ ] `aworkspace rm` with uncommitted change detection (warn before archiving dirty/unpushed worktrees)
+- [ ] **Destroyer command (`purge`/`delete`)** — deferred from 0.1; separate command, not an `archive` flag. Name TBD.
 - [ ] Archive index — stamp frontmatter into the record + write/regenerate `_archive/INDEX.md` ledger (`archive reindex`); `list --archived`
 - [ ] File-handling conventions — generate default `.gitignore` (worktree subdir + `tmp/` + `secrets/`), archive-exclude `tmp/`/`code/`, keep-but-ignore `secrets/` with size + secrets warnings
-- [ ] `aworkspace prune` for orphaned bare repos (global GC, never a side effect of `rm`)
+- [ ] `aworkspace prune` for orphaned bare repos (global GC, never a side effect of `archive`) — detects unpushed commits before deleting a bare; confirm/`--force`, never a hard block. See "prune: unpushed-commit detection" above.
 - [ ] `aworkspace update` — fetch and rebase workspace branches
 - [ ] `aworkspace reset` — reset workspace to clean state
 - [ ] Bookmarks for common git hosts
@@ -263,3 +341,4 @@ Goal: Get the basic workspace management working. Create, list, and manage works
 - Workspaces outside `WorkspacesDir` — already supported by discovery, but `list` and other commands may need awareness
 - **Multiple workspace roots** (e.g. work vs personal) — each root is an independent collection with its own root config and (optionally) its own VCS history. Resolution precedence: `--root` flag → `AWORKSPACE_ROOT` env var → global-config default. Shell integration could switch roots like `cd` does. Composes cleanly with the root-scoped-config design above — a root is already self-describing, so "more than one" needs no new model. Later nicety: a named-roots registry in global config (`[roots] work = "…"`) for `--root work` by name + completion. Only commands that *enumerate* (`list`) or *create* (`new`) care about the active root; commands inside a workspace still infer from cwd. Not needed for first releases.
 - `aworkspace cd` with no arg — interactive picker (à la `mise use`)
+- **Stale-cwd detection in shell integration** — a `precmd`/`chpwd` hook in `aworkspace init` that warns when the shell's cwd is no longer a live workspace (vanished, or moved under `_archive/`). Covers the "other shell was sitting in a workspace that got archived" gap the `archive` cwd-guard can't reach (it only inspects the invoking shell). Cheap (one stat per prompt); same mechanism direnv/mise use. Not archive-specific — general "cwd left the workspace" signal.
