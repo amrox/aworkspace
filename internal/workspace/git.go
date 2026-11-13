@@ -147,16 +147,3 @@ func isWorktreeDirty(worktreePath string, config Config) (bool, error) {
 
 	return strings.TrimSpace(out) != "", nil
 }
-
-func removeWorktree(bareRepoPath string, worktreePath string, force bool, config Config) error {
-
-	Log(LogLevelNormal, "Removing worktree: %v\n", worktreePath)
-
-	args := []string{"-C", bareRepoPath, "worktree", "remove"}
-	if force {
-		args = append(args, "--force")
-	}
-	args = append(args, worktreePath)
-	_, err := execGitCommand(config, args...)
-	return err
-}
