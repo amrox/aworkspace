@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/pelletier/go-toml/v2"
 )
@@ -16,6 +17,7 @@ const workspaceRootMetaDirName = ".aworkspace"
 const workspaceRootMetaFile = "meta.toml"
 const workspaceMetaFile = ".aworkspace.toml"
 const workspaceMetaComment = "# managed by aworkspace — do not edit directly\n\n"
+const archiveDirName = "_archive"
 
 //go:embed templates/CLAUDE.md
 var claudeMdTemplate string
@@ -52,6 +54,18 @@ func FindWorkspaceDir(startDir string) (string, error) {
 		}
 		dir = nextDir
 	}
+}
+
+func archiveDir(config Config) string {
+	return filepath.Join(config.WorkspacesDir, archiveDirName)
+}
+
+func ensureArchiveDir(config Config) (string, error) {
+	d := archiveDir(config)
+	if err := os.MkdirAll(d, 0755); err != nil {
+		return "", err
+	}
+	return d, nil
 }
 
 func writeMetadataFile(path string, data any) error {
@@ -246,6 +260,10 @@ func defaultBranchName(workspace Workspace, config Config) string {
 	return config.BranchPrefix + workspace.Name()
 }
 
+func (ws *Workspace) worktreePath(repoName string) string {
+	return filepath.Join(ws.Path, ws.Metadata.Root.WorktreeSubdir, repoName)
+}
+
 func (ws *Workspace) AddRepo(repoURL string, branch string, config Config) error {
 
 	for k := range ws.Metadata.Repos {
@@ -269,7 +287,7 @@ func (ws *Workspace) AddRepo(repoURL string, branch string, config Config) error
 	}
 
 	// TODO: handle conflicting worktree paths
-	workTreeDest := filepath.Join(ws.Path, ws.Metadata.Root.WorktreeSubdir, repo.Name)
+	workTreeDest := ws.worktreePath(repo.Name)
 	success := false
 	defer func() {
 		if !success {
@@ -330,4 +348,74 @@ func CreateWorkspaceRoot(path string, config Config) error {
 
 	wsRootMetaPath := filepath.Join(wsRootMetaDirPath, workspaceRootMetaFile)
 	return writeMetadataFile(wsRootMetaPath, meta)
+}
+
+type ArchiveOptions struct {
+	Force bool
+}
+
+func (ws *Workspace) Archive(archiveOptions ArchiveOptions, config Config) (string, error) {
+
+	// -- Step 0: Dirty Gate
+
+	var dirtyRepos []string
+	for name := range ws.Metadata.Repos {
+		dirty, err := isWorktreeDirty(ws.worktreePath(name), config)
+		if err != nil {
+			return "", err
+		}
+
+		if dirty {
+			dirtyRepos = append(dirtyRepos, name)
+		}
+	}
+
+	if len(dirtyRepos) > 0 && !archiveOptions.Force {
+		return "", fmt.Errorf("dirty worktrees (use --force): %s", strings.Join(dirtyRepos, ", "))
+	}
+
+	// -- Step 1: Capture state
+
+	worktreeSubdir := ws.Metadata.Root.WorktreeSubdir
+
+	// -- Step 2: Move workspace to _archive dir
+
+	archiveDir, err := ensureArchiveDir(config)
+	if err != nil {
+		return "", err
+	}
+	date := time.Now().Format("2006-01-02")
+	dest := filepath.Join(archiveDir, fmt.Sprintf("%s@%s", ws.Name(), date))
+
+	for i := 2; ; i++ { // collision handling
+		_, err := os.Stat(dest)
+		if os.IsNotExist(err) {
+			break
+		}
+		if err != nil {
+			return "", err
+		}
+		dest = filepath.Join(archiveDir, fmt.Sprintf("%s@%s-%d", ws.Name(), date, i))
+	}
+
+	if err := os.Rename(ws.Path, dest); err != nil {
+		return "", err
+	}
+
+	// -- Step 3: drop worktrees from the archive, clear bare bookkeeping
+	if err := os.RemoveAll(filepath.Join(dest, worktreeSubdir)); err != nil {
+		return "", err
+	}
+
+	for _, rc := range ws.Metadata.Repos {
+		repo, err := parseRepoURL(rc.URL)
+		if err != nil {
+			return "", err
+		}
+		if _, err := execGitCommand(config, "-C", repo.bareRepoPath(config), "worktree", "prune"); err != nil {
+			return "", err
+		}
+	}
+
+	return dest, nil
 }

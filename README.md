@@ -122,9 +122,19 @@ Clone an existing workspace's repo list with fresh branches.
 
 Detailed list format (repo count, branches, dirty state).
 
-### PLANNED: `aworkspace rm [workspace]`
+### PLANNED: `aworkspace archive <workspace>`
 
-Remove a workspace. Removes worktrees and deletes the workspace directory. Warns if there are uncommitted changes or unpushed branches.
+Archive a workspace (safe by default): detaches its worktrees, keeps the record (`.aworkspace.toml`, `WORKSPACE.md`, notes), and moves it to `_archive/<name>@<date>/` (e.g. `_archive/my-feature@2026-06-30/`). Never deletes shared content — the workspace's branches stay in the bare repos for later rehydrate (branch cleanup is `prune`'s job).
+
+Requires the workspace name — it does not infer from the current directory. Refuses if your shell's cwd is at or under the target workspace (`cd` out first), so archiving never moves the directory out from under you.
+
+**Options:**
+
+- `--force` — skip confirmation.
+
+A clean worktree archives with no prompt. A worktree with **uncommitted or untracked** changes archives only after confirmation (or `--force`), since those changes exist nowhere else. Committed work — pushed or not — is preserved on the kept branch.
+
+To actually delete an archived workspace, remove its folder directly (`rm -rf _archive/<name>@<date>`) — it's a plain folder. A tool-provided destroyer command is planned for a later release.
 
 ### PLANNED: `aworkspace prune`
 

@@ -136,3 +136,27 @@ func addWorktree(bareRepoPath string, worktreeDest string, branch string, config
 		"worktree", "add", worktreeDest, branch)
 	return err
 }
+
+func isWorktreeDirty(worktreePath string, config Config) (bool, error) {
+
+	out, err := execGitCommand(config, "-C", worktreePath,
+		"status", "--porcelain")
+	if err != nil {
+		return false, err
+	}
+
+	return strings.TrimSpace(out) != "", nil
+}
+
+func removeWorktree(bareRepoPath string, worktreePath string, force bool, config Config) error {
+
+	Log(LogLevelNormal, "Removing worktree: %v\n", worktreePath)
+
+	args := []string{"-C", bareRepoPath, "worktree", "remove"}
+	if force {
+		args = append(args, "--force")
+	}
+	args = append(args, worktreePath)
+	_, err := execGitCommand(config, args...)
+	return err
+}
