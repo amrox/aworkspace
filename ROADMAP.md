@@ -289,6 +289,8 @@ Goal: Get the basic workspace management working. Create, list, and manage works
 - [x] **`aworkspace init <shell>`** — Shell integration setup (emits shell wrapper for `cd`)
 - [x] **Tab completion for `aworkspace cd`** — Complete workspace names; critical for usability of `cd`
 - [x] **`aworkspace archive [workspace]`** — Safe-by-default archive (detach worktrees, keep the record, move to `_archive/`). Dirty (uncommitted/untracked) worktrees need `--force`/confirm; clean ones go through silently. No tool-provided destroyer in 0.1 — manual `rm -rf _archive/<name>` is the recourse. See "Workspace Lifecycle" above.
+- [x] **`aworkspace remove-repo <repo>`** — Inverse of `add-repo`: detach the repo's worktree, drop it from `.aworkspace.toml`. Dirty worktree needs `--force`. Refuses when cwd is at/under the worktree (guard parity with `archive`). Keeps the branch in the bare.
+  - [ ] **Managed-branch cleanup** (follow-up) — record `Branch` + `Managed` (tool-created vs user-named) per repo; on `remove-repo`, auto-delete a *managed* branch when the worktree is still on it and `git branch -d` succeeds (unpushed → kept; `--force` → `-D`). User-named branches never auto-deleted.
 - [ ] **Checkout roles** — `role` field per repo (`edit` default, `reference`); `add-repo --reference` creates a detached worktree at `origin/<base_branch>` with no named branch. See "Checkout roles" in Design Notes.
 - [ ] **Better error messages** — User-friendly errors with suggestions
 

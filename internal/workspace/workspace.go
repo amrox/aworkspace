@@ -260,7 +260,7 @@ func defaultBranchName(workspace Workspace, config Config) string {
 	return config.BranchPrefix + workspace.Name()
 }
 
-func (ws *Workspace) worktreePath(repoName string) string {
+func (ws *Workspace) WorktreePath(repoName string) string {
 	return filepath.Join(ws.Path, ws.Metadata.Root.WorktreeSubdir, repoName)
 }
 
@@ -287,7 +287,7 @@ func (ws *Workspace) AddRepo(repoURL string, branch string, config Config) error
 	}
 
 	// TODO: handle conflicting worktree paths
-	workTreeDest := ws.worktreePath(repo.Name)
+	workTreeDest := ws.WorktreePath(repo.Name)
 	success := false
 	defer func() {
 		if !success {
@@ -308,6 +308,31 @@ func (ws *Workspace) AddRepo(repoURL string, branch string, config Config) error
 
 	success = true
 	return nil
+}
+
+type RemoveRepoOptions struct {
+	Force bool
+}
+
+func (ws *Workspace) RemoveRepo(repoName string, removeOpts RemoveRepoOptions, config Config) error {
+
+	rc, ok := ws.Metadata.Repos[repoName]
+	if !ok {
+		return fmt.Errorf("repo %q not in workspace %q", repoName, ws.Name())
+	}
+
+	repo, err := parseRepoURL(rc.URL)
+	if err != nil {
+		return err
+	}
+
+	err = removeWorktree(repo.bareRepoPath(config), ws.WorktreePath(repoName), removeOpts.Force, config)
+	if err != nil {
+		return err
+	}
+
+	delete(ws.Metadata.Repos, repoName)
+	return ws.writeMetadata()
 }
 
 func CreateWorkspaceRoot(path string, config Config) error {
@@ -360,7 +385,7 @@ func (ws *Workspace) Archive(archiveOptions ArchiveOptions, config Config) (stri
 
 	var dirtyRepos []string
 	for name := range ws.Metadata.Repos {
-		dirty, err := isWorktreeDirty(ws.worktreePath(name), config)
+		dirty, err := isWorktreeDirty(ws.WorktreePath(name), config)
 		if err != nil {
 			return "", err
 		}
