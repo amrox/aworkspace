@@ -49,6 +49,8 @@ base_branch = "main"
 - `update` (0.2) fetches and rebases/merges from `origin/<base_branch>`.
 - For reference repos, `base_branch` is what the detached worktree is checked out at — e.g. pin to `main` even if the repo defaults to `dev`.
 
+**Branch ownership & cleanup (revisiting — approach TBD):** How aworkspace decides which branches it may auto-clean on `remove-repo` is deliberately deferred. Two schemes were explored and set aside: (1) *name-based* — treat `branch == workspace name` as "ours" (unsafe when a foreign branch collides with the workspace name); (2) a *per-branch git marker* recording that aworkspace created the branch (safe by construction, but more machinery). Current lean: **sidestep branch-ownership entirely** rather than track it — the concrete direction is still open. Until resolved, `remove-repo` keeps branches (shipped behavior) and no `--base`/`--branch` knob is wired on `add-repo`.
+
 **Open question (0.1 decision required):** Workspace context file naming. Options:
 - `WORKSPACE.md` — Avoids collision with repo READMEs, clear purpose. Current leaning.
 - `README.md` — More conventional, but conflicts when repos have their own READMEs in `code/`
@@ -290,7 +292,7 @@ Goal: Get the basic workspace management working. Create, list, and manage works
 - [x] **Tab completion for `aworkspace cd`** — Complete workspace names; critical for usability of `cd`
 - [x] **`aworkspace archive [workspace]`** — Safe-by-default archive (detach worktrees, keep the record, move to `_archive/`). Dirty (uncommitted/untracked) worktrees need `--force`/confirm; clean ones go through silently. No tool-provided destroyer in 0.1 — manual `rm -rf _archive/<name>` is the recourse. See "Workspace Lifecycle" above.
 - [x] **`aworkspace remove-repo <repo>`** — Inverse of `add-repo`: detach the repo's worktree, drop it from `.aworkspace.toml`. Dirty worktree needs `--force`. Refuses when cwd is at/under the worktree (guard parity with `archive`). Keeps the branch in the bare.
-  - [ ] **Managed-branch cleanup** (follow-up) — record `Branch` + `Managed` (tool-created vs user-named) per repo; on `remove-repo`, auto-delete a *managed* branch when the worktree is still on it and `git branch -d` succeeds (unpushed → kept; `--force` → `-D`). User-named branches never auto-deleted.
+  - [ ] **Branch cleanup** (follow-up, revisiting) — whether/how `remove-repo` auto-deletes the branch is being reconsidered; current lean is to sidestep branch-ownership rather than track it. See "Branch ownership & cleanup (revisiting)" in Design Notes. Until decided, `remove-repo` keeps the branch.
 - [ ] **Checkout roles** — `role` field per repo (`edit` default, `reference`); `add-repo --reference` creates a detached worktree at `origin/<base_branch>` with no named branch. See "Checkout roles" in Design Notes.
 - [ ] **Better error messages** — User-friendly errors with suggestions
 
