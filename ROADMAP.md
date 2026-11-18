@@ -2,54 +2,49 @@
 
 ## Design Notes
 
-**Branch naming:** The default branch is the **(slugified) workspace name**, the same name in every *edit* repo of the workspace — no prefix. Workspace `my-feature` → branch `my-feature`. (Reference repos get no branch at all — see "Checkout roles" below.)
+**Branch model (decided): aworkspace does not manage branches.** Every repo starts with **no branch**, checked out at the remote's default branch. You (or an agent) create branches when work starts. The tool never creates, names, reuses or deletes a branch.
 
-Precedent: this is git's own default. `git worktree add <path>` with no branch argument creates a branch named after the path's basename. We apply the same rule one level up — the workspace dir's basename names the branch.
+**Why: a workspace is a place, not a task.** Real usage is one semi-permanent default workspace for small tasks, plus long-lived workspaces at the epic/initiative level. Both ship many branches over their life, so a "one workspace = one branch" rule fits neither. Quick throwaway tasks are out of scope: they go in the default workspace or in an agent's own worktree.
 
-Guiding principle: *the branch name describes the work, not the plumbing.* The earlier `ws/<workspace>` scheme was called "plumbing," but the user sees it everywhere (push, PRs, prompts) — so it isn't plumbing, it's porcelain. Two concrete wins from dropping the prefix:
+- **Workspace = context:** the repo set, roles, notes and record. Long-lived by design.
+- **Branch = a task inside it:** named for the work, owned by whoever created it.
 
-- **Local name = remote name.** No translation when you push or open a PR, no `ws/foo`→`feature/login` mental mapping. This was the single most surprising thing about the prefix scheme.
-- **Bookkeeping moves to metadata, not the name.** "Which branches belong to this workspace?" is answered by `.aworkspace.toml` / the workspace dir, not by a `grep ws/`. The branch name is freed to be natural. (Cost: discoverability/cleanup now depend on the metadata store being trustworthy — `doctor` reconciles metadata vs. actual worktrees/branches.)
+**Mechanics:**
 
-A `branch_prefix` config (default `""`) remains for users who deliberately want namespaced/throwaway branches.
+- `add-repo <url>` runs `git worktree add --detach <dest> origin/<default>`, where `<default>` is the remote's HEAD. There is no branch argument and no `--base` flag.
+- Start work with `git checkout -b <name>` in the worktree. It works from the no-branch state and carries along uncommitted changes and any commits already made there.
+- `remove-repo` and `archive` keep every branch in the bare. Branch cleanup is the user's (`git branch -d`).
 
-**Collision handling** (least-surprising order — never silent):
-1. Branch doesn't exist → create it from the base branch.
-2. Branch exists and isn't checked out in any worktree → **reuse it** (attach the worktree). Silently forking to `my-feature-2` when `my-feature` is sitting right there is the surprising move.
-3. Branch exists **and** is checked out in another worktree (git forbids sharing) → **error, don't auto-rename.**
+**Why no-branch is forced, not a taste choice:** git allows a branch to be checked out in only one worktree, and all workspaces share one bare repo per remote. Any starting point that many workspaces can share must therefore be detached. (Checking out `origin/main` directly is also a detached HEAD.)
 
-Why error rather than auto-disambiguate (e.g. `my-feature-2`): with unique workspace names and clean teardown, this collision is *exceptional* — it almost always means a dirty state (a workspace removed without cleanup left a stale worktree holding the branch). Silently minting a `-2` branch reintroduces exactly the surprising, non-`local==remote` name we dropped `ws/` to avoid, and it produces litter. So we shout instead:
+**What this removes:** the workspace-named branch, `branch_prefix`, collision handling, branch ownership/markers, `--base`/`--branch` flags on `add-repo`, and the stored `base_branch`.
 
-- Fail with a clear message naming the worktree that holds the branch, e.g. `branch 'my-feature' is already checked out at <path>; run 'aworkspace doctor' or pass an explicit branch`.
-- The user's escape hatches are already there: `add-repo <url> <branch>` to pick a different name, or `doctor`/`prune` to clean up the stale holder.
-- (An earlier draft proposed a `<workspace>+<repo>` suffix. Dropped: the suffix is constant per (workspace, repo) so it's idempotent — it can't disambiguate a *second* collision, and it can't disambiguate two worktrees of the *same* repo at all.)
+**What it requires instead:**
 
-**Visibility is the real least-surprise lever.** `new`/`add-repo` print exactly what they did, e.g.:
+- **A record of where each repo sits** — branch name (if any) plus SHA, read from live HEAD when the record is written (archive, sync). Rehydrate and `new --from` rebuild from this. It is recorded state, not a creation-time setting.
+- **An orphan-commit check.** Commits made before branching are reachable from no ref and are lost when the worktree is detached. `archive` and `remove-repo` treat them as dirty (confirm / `--force`). Detection: `git rev-list HEAD --not --branches --remotes --tags` non-empty.
+- **`status`/`show` read live HEAD** for every repo; nothing trusts a stored branch name.
+
+**Visibility carries the model.** Many git users are uneasy with "detached HEAD", so the output says "no branch" and always names the next step:
 
 ```
-workspace 'fix-auth'
-  api     → branch fix-auth (new, from main)
-  shared  → branch fix-auth (reusing existing)
-  docs    → detached at origin/main (reference)
+workspace 'nav-rewrite'
+  api     → at origin/main (no branch). Start work: git checkout -b <name>
+  shared  → at origin/main (no branch). Start work: git checkout -b <name>
 ```
 
-The `reusing existing` line is the only guard against a generic workspace name (`test`, `wip`) silently picking up an unrelated branch of the same name, so this output is part of the design, not polish.
+`status` flags the one risky case, e.g. `api: 2 commits not on any branch`. The README states the contract once: repos start at the default branch with no branch of their own; create one when you start work.
 
-**Base branch:** Each repo can specify a `base_branch` — what the workspace branch forks from. Stored in `.aworkspace.toml` per-repo (metadata, **not** in the branch name):
+**Agent worktrees layer on top.** An agent that wants its own worktree can create one from inside a workspace worktree; it registers with the same shared bare. The workspace worktree is the durable home base, the agent's is a throwaway sandbox. Agent branches are simply branches the tool does not touch. (Cost: an agent worktree covers one repo, so it loses the sibling repos.)
 
-```toml
-[repos.my-service]
-url = "git@github.com:org/my-service.git"
-base_branch = "main"
-```
+**Deferred conveniences — add only when missed:**
 
-- `add-repo` starts the branch from `origin/<base_branch>`: `git worktree add <dest> -b my-feature origin/main` (case 1 above).
-- Normal git upstream applies — once pushed, `my-feature` tracks `origin/my-feature` (set on first push). We do **not** set upstream to `origin/<base_branch>`: that would make `git push` target the base branch — exactly the surprising indirection we're removing. Ahead/behind-of-base is computed explicitly from metadata by `status`/`update` instead.
-- If omitted, defaults to the remote's HEAD (the repo's default branch) and is stored explicitly so the metadata is self-describing.
-- `update` (0.2) fetches and rebases/merges from `origin/<base_branch>`.
-- For reference repos, `base_branch` is what the detached worktree is checked out at — e.g. pin to `main` even if the repo defaults to `dev`.
+- `add-repo --at <ref>` to start at a tag or another branch (today: move the worktree by hand). Watch for repeated hand-pinning of reference repos to release tags.
+- A start-a-task helper that creates the same branch name across chosen repos.
 
-**Branch ownership & cleanup (revisiting — approach TBD):** How aworkspace decides which branches it may auto-clean on `remove-repo` is deliberately deferred. Two schemes were explored and set aside: (1) *name-based* — treat `branch == workspace name` as "ours" (unsafe when a foreign branch collides with the workspace name); (2) a *per-branch git marker* recording that aworkspace created the branch (safe by construction, but more machinery). Current lean: **sidestep branch-ownership entirely** rather than track it — the concrete direction is still open. Until resolved, `remove-repo` keeps branches (shipped behavior) and no `--base`/`--branch` knob is wired on `add-repo`.
+**`update` (0.2), open:** for a repo with no branch and no local commits, re-detach at the freshly fetched default branch. Repos on a branch are the user's to rebase; the tool may fetch only.
+
+**Earlier designs, set aside** (all assumed one task per workspace; details are in git history): a `ws/<workspace>` prefix; a branch named after the workspace (git's own precedent: `git worktree add <path>` names the branch after the path's basename) with reuse/error collision handling; and a per-branch git marker recording ownership.
 
 **Open question (0.1 decision required):** Workspace context file naming. Options:
 - `WORKSPACE.md` — Avoids collision with repo READMEs, clear purpose. Current leaning.
@@ -70,24 +65,18 @@ This needs to be configurable:
 
 Without this, every agent session requires manual explanation of workspace isolation rules.
 
-**Checkout roles (edit vs reference):** Each repo checkout in a workspace could be tagged as either "edit" (actively being developed) or "reference" (read-only context for agents). For example, a workspace might have `my-service` as the edit target while `shared-lib` and `api-spec` are references. It helps agents understand which code they should be modifying vs. just reading for context. Stored as a per-repo field in `.aworkspace.toml` (default `edit`):
+**Checkout roles (edit vs reference):** Each repo in a workspace can be tagged "edit" (actively developed) or "reference" (read-only context). For example, `my-service` is the edit target while `shared-lib` and `api-spec` are references. Stored per repo in `.aworkspace.toml` (default `edit`):
 
 ```toml
 [repos.shared-lib]
 url = "git@github.com:org/shared-lib.git"
-base_branch = "main"
 role = "reference"
 ```
 
-The role is advisory (nothing stops you editing a reference repo) with **one mechanical effect: reference repos are checked out detached, with no named branch** (decided).
-
-- `add-repo --reference` runs `git worktree add --detach <dest> origin/<base_branch>` (flag name tentative).
-- **Why:** a repo you only read doesn't need a `my-feature` branch — it's litter in the bare and noise in the forge if ever pushed. Detached also sidesteps collision handling entirely: any number of workspaces can sit detached at the same commit, so cases 1–3 above never arise for reference repos.
-- **Why not detached for edit repos too:** it trades a naming problem for a data-safety problem. Commits on a detached HEAD are only protected while the worktree exists, so archive's "committed work is safe on the kept branch" guarantee would break, `prune`'s `--branches` scan wouldn't see them, pushing needs `HEAD:refs/heads/<name>`, and prompts/tools show a SHA. Reference repos never commit, so none of those costs apply.
-- **Safety net for the exception:** if someone does commit in a reference repo, those commits are reachable from no ref. `archive` treats this as dirty (confirm / `--force`), same class as uncommitted changes. Detection: `git rev-list HEAD --not --branches --remotes --tags` non-empty.
-- **Promotion (reference → edit):** create the workspace branch at the current HEAD (`git switch -c <workspace-name>`) and flip `role`. Manual in 0.1; a command can come later if it's missed.
-- `update` (0.2) moves a reference repo by re-detaching at the freshly fetched `origin/<base_branch>` — no rebase/merge.
-- `status` reads the live HEAD for every repo rather than trusting a stored branch name, so a detached repo (or a renamed branch) reports correctly.
+- **Purely advisory.** It tells agents which code to modify and which to only read. It has no mechanical effect: under the branch model above every repo starts the same way (no branch), and a repo is "being edited" simply once someone branches in it.
+- **A reference is still a full worktree,** not a symlink to one shared checkout or an exported snapshot. That keeps real files on disk for grep/LSP/agents, a version pinned per workspace, full history (`git log`, `git blame`, `git grep <pattern> <rev>` all work from a no-branch worktree), and the option to start editing it later. The cost is only the checked-out files; objects live in the shared bare.
+- **Bares are full clones — never shallow or partial.** The point is to clone once and have all history reachable from every workspace.
+- **Pinning a reference to a version** (e.g. a release tag) is done by hand for now: `git checkout --detach v1.2.3` in the worktree. The recorded SHA preserves it across rehydrate.
 
 **Worktree subdir scoping (and "the workspaces root" as a first-class entity):** The worktree subdir name (`worktree_subdir`, e.g. `code/`) should be **scoped to the workspaces root, not to global config read at per-workspace creation time.** The current flaw: the value is resolved from transient global config when each workspace is created, so one root accumulates workspaces stamped with whatever global config said on each creation day — producing intra-root heterogeneity (`A/code/`, `B/worktrees/`). The configurability isn't the problem; the scope and timing are. Fix with three-level resolution (like git config / mise):
 
@@ -140,9 +129,9 @@ Primary motivation for archive is **preserving the record/memory**. Resumability
 
 ### archive: dirty detection & confirmation (decided)
 
-Under **A1** — archive never deletes shared *content* (branches/objects/the bare stay put; it only detaches each worktree, which updates that worktree's own registration) — archive can only ever destroy state that lives **only in the worktree**. So dirty detection reduces to one question per repo: are there **uncommitted or untracked** changes? Committed work — pushed or not — is safe on the kept branch, so unpushed commits are reported as FYI, never a gate. (Untracked is counted *after* the ignore rules, so `tmp/`/`secrets/` don't cry wolf.)
+Under **A1** — archive never deletes shared *content* (branches/objects/the bare stay put; it only detaches each worktree, which updates that worktree's own registration) — archive can only ever destroy state that lives **only in the worktree**. So dirty detection reduces to one question per repo: are there **uncommitted or untracked** changes? Committed work on a branch — pushed or not — is safe on the kept branch, so unpushed commits are reported as FYI, never a gate. (Untracked is counted *after* the ignore rules, so `tmp/`/`secrets/` don't cry wolf.)
 
-**One exception — detached worktrees (reference repos).** "Safe on the kept branch" assumes a branch. A detached worktree has none, so commits made there exist only in the worktree's HEAD and are orphaned when it is detached. They count as dirty: `git rev-list HEAD --not --branches --remotes --tags` non-empty → confirm / `--force`. See "Checkout roles" in Design Notes.
+**One exception — commits on no branch.** Repos start with no branch (see "Branch model" in Design Notes). Commits made before branching exist only in the worktree's HEAD and are orphaned when it is detached, so they count as dirty: `git rev-list HEAD --not --branches --remotes --tags` non-empty → confirm / `--force`. The same check applies to `remove-repo`.
 
 Confirmation falls out of "what gets destroyed":
 
@@ -192,7 +181,7 @@ Archive-forever guarantees collisions: you can `new feature1`, archive it, then 
 
 - **Always dated, not just on collision.** The date is useful at a glance in `ls _archive/`, sorts re-archives of a name together chronologically, and avoids special-casing the first one.
 - **`@` delimiter** is unambiguous precisely because workspace names are validated `[A-Za-z0-9_-]` (no `@`), so it can never appear in a name. (`_`/`-` would blur the name/date boundary.)
-- **Same-day, same-name collisions** get a first-free counter: `feature1@2026-06-30`, `feature1@2026-06-30-2`, … (rare path; same terminating "increment to first free" loop as branch collisions).
+- **Same-day, same-name collisions** get a first-free counter: `feature1@2026-06-30`, `feature1@2026-06-30-2`, … (rare path; a terminating "increment to first free" loop).
 - **The folder name is never parsed** — frontmatter (`name`, `archived` date) is the authority and `reindex` reads *that*, not the folder. So the name only has to be *readable + unique on disk*; a manual `mv` of an archive breaks nothing. The folder date equals the frontmatter `archived` date (one timestamp).
 - **`Archive` returns the resolved path** so the CLI can report where it went and callers/tests don't have to recompute the date.
 - **Never overwrite or merge** into an existing archive dir — always land in a fresh, deconflicted path.
@@ -232,10 +221,11 @@ Archives are forever, so heavy files in the record layer are paid for forever. A
 - Ignoring `code/` makes the VCS boundary line up exactly with the layer boundary (track record + archive, ignore worktrees, never see bare repos) and sidesteps the embedded-repo problem.
 - Tips & tricks doc section ("Using aworkspace with git/jj"): track the workspaces dir on a **single linear history — never branch** (the cross-product of every project's worktree state is the head-spin). jj's working-copy-as-commit auto-snapshot is a strong fit for a frictionless memory journal. jj's LFS/submodule gaps don't affect this use case — the journal is plain text and worktrees are ignored, while project repos inside `code/` keep using git + LFS + submodules independently. The VCS choice for the journal is decoupled from what the projects need.
 - **Backup vs. sync guidance** (docs): adding a workspaces root to VCS is useful for historical tracking and off-machine backup. Syncing the repo across multiple machines is up to the user — conflicts, branching, and merge are VCS workflow, not the tool's job. Secrets and other untracked files don't travel with the repo by design.
+- **Possible later: an opt-in `sync`** for the one case that stays simple — a single user across a few machines, no live collaboration. Shape: commit the journal, `git pull --rebase`, push; then push *committed* work branches (print what will be pushed and make it confirmable — it creates remote branches teammates see and can trigger CI); report repos with uncommitted changes but **never auto-commit code**. Works at one-workspace and all-workspaces level, and reuses the dirty/unpushed checks. Auto-commit of the journal on `new`/`add-repo`/`archive` could follow, also opt-in. Requires: work branches pushed to their own remotes, and no machine-specific absolute paths in metadata. On the second machine the flow is pull → rehydrate → work.
 
 ### Rehydrate: archive's inverse, and the backup-loop closer
 
-A command that makes on-disk reality match the record — recreate missing bares and worktrees from `.aworkspace.toml` (URLs + base branches + recorded SHAs). **Name is a working title; candidates: `rehydrate` / `restore` / `materialize` / `doctor --fix`.** The capability is what matters, not the name.
+A command that makes on-disk reality match the record — recreate missing bares and worktrees from `.aworkspace.toml` (URLs + each repo's recorded branch and SHA). **Name is a working title; candidates: `rehydrate` / `restore` / `materialize` / `doctor --fix`.** The capability is what matters, not the name.
 
 It's more load-bearing than a mere repair tool: **because `code/` is gitignored, a VCS backup deliberately omits the worktrees and bares.** So a fresh clone of the journal on a new machine is just the record — nothing runnable. Rehydrate is the *only* thing that turns that record back into a working setup, which means the moment VCS-backup is a goal, rehydrate stops being optional. It's a single primitive that serves three needs:
 
@@ -248,11 +238,41 @@ It's more load-bearing than a mere repair tool: **because `code/` is gitignored,
 | Layer | Restored? | From |
 |---|---|---|
 | Record (notes, `.aworkspace.toml`) | ✅ already present | the VCS clone |
-| Bares + worktrees | ✅ recreated | re-clone + worktree add at recorded base/SHA |
+| Bares + worktrees | ✅ recreated | re-clone + worktree add on the recorded branch if it still exists, else no-branch at the recorded SHA |
 | `secrets/` | ❌ not restored | gitignored — user re-provides |
 | Uncommitted worktree changes | ❌ gone | never in VCS/bares unless pushed |
 
 Secrets not syncing is correct and desired, but it's a sharp edge on a fresh restore — so rehydrate should *say so*: a one-line `secrets/ is gitignored and was not restored — re-add your env files` (visibility, never enforcement, same as the big-files warning). Out of scope: multi-machine conflicts, branching, and sharing of the journal repo — that's the user's VCS workflow.
+
+### Seeding: `new --from` (fork / template)
+
+`new <name> --from <workspace>` creates a new workspace seeded from an existing one. It is a **seeded copy, not a link**: the two share an origin and nothing else — no syncing, no parent/child relationship. ("Fork" in the git-hosting sense; not "branch".)
+
+Distinct from rehydrate: rehydrate restores the *same* workspace; `--from` makes a *new* one.
+
+**One mechanism, three sources:**
+
+- **A live workspace** — spin a parallel line of work off an epic or the default workspace, keeping its context.
+- **An archived workspace** — restart old work under a new name.
+- **A template** — a workspace kept only to be copied from. Templates are not a separate feature: a template is a workspace you seed from. (Scaffolding for plain `new` — custom `CLAUDE.md`, standard files — may still want its own config; revisit once `--from` exists.)
+
+**What is copied:**
+
+| Content | Copied? |
+|---|---|
+| Repo set and roles (`.aworkspace.toml`) | ✅ |
+| Context files (`WORKSPACE.md`, `CLAUDE.md`, notes/resources) | ✅ |
+| `tmp/`, `secrets/` | ❌ (same warning as rehydrate for `secrets/`) |
+| Worktrees / uncommitted changes | ❌ — fresh worktrees are created |
+
+- **Provenance only:** the new workspace records `seeded_from = "<name>"` (plus date). Informational — nothing reads it to keep the two in sync.
+
+**Open: where the copy's repos start.**
+
+- **At each repo's default branch** — what a template wants (fresh start, latest code).
+- **At the commits the source is sitting on** — what a mid-epic fork wants (continue from here). The copy cannot reuse the source's branches while the source is live (one branch, one worktree), so this means no-branch at the same SHAs.
+
+Possibly a flag, with the default branch as the default.
 
 ### Parked implementation TODOs
 
@@ -276,12 +296,12 @@ Goal: Get the basic workspace management working. Create, list, and manage works
   - Makes agents immediately understand that repos are independent projects
 - [x] **`aworkspace list`** — List all workspaces (basic: name only)
 - [x] **`aworkspace show`** — Display current workspace info (repos, branches, status)
-- [x] **`aworkspace add-repo <url> [branch]`** — Clone bare repo + create worktree
+- [x] **`aworkspace add-repo <url>`** — Clone bare repo + create worktree
   - Handle bare clone creation
-  - Create worktree with branch
   - Update `.aworkspace.toml` with repo metadata
-  - Branch = workspace name by default (no prefix); optional configurable prefix; collision handling per Design Notes
   - **Support multiple different repos per workspace**
+  - [ ] **Switch to the no-branch model** — worktree starts detached at the remote's default branch; remove the branch argument, `defaultBranchName` and `branch_prefix`; print the "no branch / start work" line. See "Branch model" in Design Notes.
+- [ ] **Orphan-commit check** — `archive` and `remove-repo` treat commits on no branch as dirty (confirm / `--force`); `show`/`status` flag them.
 - [x] **`-C <path>` flag** — Override working directory for commands that depend on cwd (`show`, `add-repo`)
 - [x] **Basic tests** — Unit tests for workspace discovery, config loading, path handling
 
@@ -292,8 +312,8 @@ Goal: Get the basic workspace management working. Create, list, and manage works
 - [x] **Tab completion for `aworkspace cd`** — Complete workspace names; critical for usability of `cd`
 - [x] **`aworkspace archive [workspace]`** — Safe-by-default archive (detach worktrees, keep the record, move to `_archive/`). Dirty (uncommitted/untracked) worktrees need `--force`/confirm; clean ones go through silently. No tool-provided destroyer in 0.1 — manual `rm -rf _archive/<name>` is the recourse. See "Workspace Lifecycle" above.
 - [x] **`aworkspace remove-repo <repo>`** — Inverse of `add-repo`: detach the repo's worktree, drop it from `.aworkspace.toml`. Dirty worktree needs `--force`. Refuses when cwd is at/under the worktree (guard parity with `archive`). Keeps the branch in the bare.
-  - [ ] **Branch cleanup** (follow-up, revisiting) — whether/how `remove-repo` auto-deletes the branch is being reconsidered; current lean is to sidestep branch-ownership rather than track it. See "Branch ownership & cleanup (revisiting)" in Design Notes. Until decided, `remove-repo` keeps the branch.
-- [ ] **Checkout roles** — `role` field per repo (`edit` default, `reference`); `add-repo --reference` creates a detached worktree at `origin/<base_branch>` with no named branch. See "Checkout roles" in Design Notes.
+  - Branch cleanup: **decided — none.** The tool never deletes branches (see "Branch model").
+- [ ] **Checkout roles** — advisory `role` field per repo (`edit` default, `reference`), surfaced to agents via the generated `CLAUDE.md`. No mechanical effect. See "Checkout roles" in Design Notes.
 - [ ] **Better error messages** — User-friendly errors with suggestions
 
 ### Out of Scope for 0.1
@@ -314,13 +334,13 @@ Goal: Get the basic workspace management working. Create, list, and manage works
 - [ ] Archive index — stamp frontmatter into the record + write/regenerate `_archive/INDEX.md` ledger (`archive reindex`); `list --archived`
 - [ ] File-handling conventions — generate default `.gitignore` (worktree subdir + `tmp/` + `secrets/`), archive-exclude `tmp/`/`code/`, keep-but-ignore `secrets/` with size + secrets warnings
 - [ ] `aworkspace prune` for orphaned bare repos (global GC, never a side effect of `archive`) — detects unpushed commits before deleting a bare; confirm/`--force`, never a hard block. See "prune: unpushed-commit detection" above.
-- [ ] `aworkspace update` — fetch and rebase workspace branches
+- [ ] `aworkspace update` — fetch; move untouched no-branch repos to the new default-branch tip. Repos on a branch are the user's to rebase (open, see "Branch model").
 - [ ] `aworkspace reset` — reset workspace to clean state
 - [ ] Bookmarks for common git hosts
-- [ ] `--from` flag for cloning workspaces
+- [ ] `new --from <workspace>` — seed a new workspace from a live, archived or template workspace (seeded copy, no link). See "Seeding: `new --from`" above.
 - [ ] **Configurable `CLAUDE.md` generation** — Config option to disable auto-creation of `CLAUDE.md`
 - [ ] **Verbosity levels** — Default (friendly short output), `--quiet` (silent), `--verbose` (include git command output)
-- [ ] **Workspace templates** — User-defined templates for `new` command (scaffolding, standard files, custom CLAUDE.md)
+- [ ] **Workspace templates** — User-defined templates for `new` command (scaffolding, standard files, custom CLAUDE.md). Largely covered by `new --from` (a template is a workspace you seed from); keep only what that doesn't cover.
 
 ## Milestone 0.3 - Quality of Life
 
