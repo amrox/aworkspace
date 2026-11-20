@@ -20,3 +20,21 @@ a single initiative. Each worktree is a subdirectory which may have its own
 - Do not clone, fetch, or push to repos not already checked out here.
 - This workspace is temporary scaffolding for development — it will not be
   committed or shared as a unit.
+
+## Branches and worktrees
+
+Each repo's **primary worktree** is `code/<repo>` and starts **detached** at the
+repo's default branch — it is on no branch. Before committing work you want to
+keep, create a branch (`git -C code/<repo> switch -c <branch>`). Commits made on
+no branch can be lost when the workspace is archived.
+
+For isolated or parallel work you may add an **extra worktree** of a repo:
+
+- Put it **beside** the primary, never nested inside it:
+  `git -C code/<repo> worktree add -b <branch> ../<repo>--<task>`
+- Always create it on a branch (the `-b` above), so its commits survive removal.
+- Never remove a repo's primary worktree `code/<repo>`.
+- When done, commit, then remove the extra:
+  `git -C code/<repo> worktree remove ../<repo>--<task>`
+
+Do not create worktrees outside this workspace directory.
