@@ -35,7 +35,32 @@ workspace 'nav-rewrite'
 
 `status` flags the one risky case, e.g. `api: 2 commits not on any branch`. The README states the contract once: repos start at the default branch with no branch of their own; create one when you start work.
 
-**Agent worktrees layer on top.** An agent that wants its own worktree can create one from inside a workspace worktree; it registers with the same shared bare. The workspace worktree is the durable home base, the agent's is a throwaway sandbox. Agent branches are simply branches the tool does not touch. (Cost: an agent worktree covers one repo, so it loses the sibling repos.)
+**Extra worktrees: short-lived work inside a long-lived workspace (decided — convention, no command).** The workspace is medium-to-permanent; branches and extra worktrees inside it can be as short-lived as you like. No hard rule, same as git branches. A repo's **primary worktree** (`code/<repo>`, the one `add-repo` made) is the durable home base; you or an agent may add **extra worktrees** of the same repo for isolated tasks. This is ordinary git: `git worktree add` run from inside a worktree registers with the same shared bare. It also keeps agents inside the workspace instead of scattering worktrees elsewhere.
+
+Conventions (recommended, not enforced):
+
+- **Location: beside the primary, never nested inside it** — `code/<repo>--<task>`, e.g. `git -C code/api worktree add -b fix-auth ../api--fix-auth`. The whole worktree subdir is dropped on archive, so an extra beside the primary needs no new bookkeeping, and relative paths to sibling repos (`../shared`) keep working. Nesting inside the primary (some agent tools default to this, e.g. `<repo>/.claude/worktrees/`) breaks sibling paths and lets `remove-repo` take the nested worktree with it.
+- **The name is never parsed.** Git knows which bare each worktree belongs to; the suffix is for humans (same rule as archive folder names). The separator is therefore free to change — `--` is the working choice, `+` the alternative under trial.
+- **Not recorded.** Only the primary is in `.aworkspace.toml`. Extras are read live from git/the filesystem, the same way branches are. Rehydrate restores primaries only.
+- **Always on a branch.** An extra worktree gets a branch at creation, so its commits survive removal.
+- **Creator cleans up:** commit, then `git worktree remove <path>`.
+- **Agents are told.** The generated `CLAUDE.md` carries this guidance (location, branch, cleanup), agent-agnostic:
+
+  ```markdown
+  ## Worktrees in this workspace
+
+  - Each repo's primary worktree is `code/<repo>`. Do not remove it.
+  - For isolated work, create an extra worktree beside it, never inside it:
+    `git -C code/<repo> worktree add -b <branch> ../<repo>--<task>`
+  - Always create it on a branch, so commits survive removal.
+  - When done, commit, then remove it: `git worktree remove code/<repo>--<task>`
+  ```
+
+The convention cannot be relied on — an agent's built-in worktree feature may use its own location — so safety comes from discovery, not placement: see "archive: dirty detection" for the scan. A misplaced worktree is untidy, never dangerous.
+
+- **`remove-repo` with extras present:** removes the primary only, leaves the extras, and prints a warning listing them (the archive scan still covers them later).
+- **Later, if missed:** `show` lists extras it finds; a command to create them.
+- (Alternative layout considered: a separate `worktrees/<repo>/<task>` dir. Tidier `code/`, but needs a second ignore/archive rule and breaks `../<sibling>` paths. Revisit only if `code/` gets cluttered in practice.)
 
 **Deferred conveniences — add only when missed:**
 
@@ -132,6 +157,8 @@ Primary motivation for archive is **preserving the record/memory**. Resumability
 Under **A1** — archive never deletes shared *content* (branches/objects/the bare stay put; it only detaches each worktree, which updates that worktree's own registration) — archive can only ever destroy state that lives **only in the worktree**. So dirty detection reduces to one question per repo: are there **uncommitted or untracked** changes? Committed work on a branch — pushed or not — is safe on the kept branch, so unpushed commits are reported as FYI, never a gate. (Untracked is counted *after* the ignore rules, so `tmp/`/`secrets/` don't cry wolf.)
 
 **One exception — commits on no branch.** Repos start with no branch (see "Branch model" in Design Notes). Commits made before branching exist only in the worktree's HEAD and are orphaned when it is detached, so they count as dirty: `git rev-list HEAD --not --branches --remotes --tags` non-empty → confirm / `--force`. The same check applies to `remove-repo`.
+
+**Scope: every worktree about to be deleted, not only the repos in the metadata.** Archive removes the whole worktree subdir, so the checks must cover everything in it — primaries, extra worktrees (see "Extra worktrees" in Design Notes), nested ones, anything an agent added. Discovery is a scan of the worktree subdir for directories containing a `.git` entry; each one gets the same two checks (uncommitted/untracked, commits on no branch) and is reported by path in the confirm. "Owned or not" is irrelevant: what matters is what is about to be deleted. Nothing else changes — an extra worktree can lose exactly what a primary can, its branches live in the bare and survive, and the existing `git worktree prune` clears its registration. Worktrees outside this workspace are never touched (prune only clears entries whose directory is gone).
 
 Confirmation falls out of "what gets destroyed":
 
@@ -313,12 +340,14 @@ Goal: Get the basic workspace management working. Create, list, and manage works
 - [x] **`aworkspace archive [workspace]`** — Safe-by-default archive (detach worktrees, keep the record, move to `_archive/`). Dirty (uncommitted/untracked) worktrees need `--force`/confirm; clean ones go through silently. No tool-provided destroyer in 0.1 — manual `rm -rf _archive/<name>` is the recourse. See "Workspace Lifecycle" above.
 - [x] **`aworkspace remove-repo <repo>`** — Inverse of `add-repo`: detach the repo's worktree, drop it from `.aworkspace.toml`. Dirty worktree needs `--force`. Refuses when cwd is at/under the worktree (guard parity with `archive`). Keeps the branch in the bare.
   - Branch cleanup: **decided — none.** The tool never deletes branches (see "Branch model").
+- [ ] **Extra-worktree safety** — `archive` scans the worktree subdir for every worktree (not only repos in `.aworkspace.toml`) and applies the dirty + orphan-commit checks to each; `remove-repo` warns when the repo has extra worktrees. See "Extra worktrees" in Design Notes.
+- [ ] **Worktree guidance in generated `CLAUDE.md`** — location (`code/<repo>--<task>`), always on a branch, creator cleans up.
 - [ ] **Checkout roles** — advisory `role` field per repo (`edit` default, `reference`), surfaced to agents via the generated `CLAUDE.md`. No mechanical effect. See "Checkout roles" in Design Notes.
 - [ ] **Better error messages** — User-friendly errors with suggestions
 
 ### Out of Scope for 0.1
 
-- Multiple worktrees of the same repo (same bare, different branches)
+- A command to create/manage extra worktrees of the same repo (the convention and the archive scan are in scope — see "Extra worktrees" in Design Notes)
 - Bookmarks
 - `update`/`reset` commands
 - `prune` command
