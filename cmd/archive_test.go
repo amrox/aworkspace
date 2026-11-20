@@ -72,25 +72,20 @@ func TestArchiveCmd(t *testing.T) {
 		}
 	})
 
-	t.Run("archives from outside the workspace", func(t *testing.T) {
+	t.Run("disabled: refuses even from a valid outside cwd", func(t *testing.T) {
 		workspacesDir, wsPath, config := setupArchiveWS(t, "feature1")
-		// cwd = the workspaces root: a parent of the workspace, not under it -> allowed
-		_, err := runArchive(t, config, "feature1", "-C", workspacesDir)
-		if err != nil {
-			t.Fatalf("archive from outside failed: %v", err)
+		// cwd = the workspaces root: normally allowed, but archive is disabled
+		// pending the extra-worktree safety scan.
+		out, err := runArchive(t, config, "feature1", "-C", workspacesDir)
+		if err == nil {
+			t.Fatal("expected archive to be disabled, got nil")
 		}
-		if _, err := os.Stat(wsPath); !os.IsNotExist(err) {
-			t.Errorf("expected original workspace dir gone, stat err = %v", err)
+		if !strings.Contains(err.Error(), "disabled") {
+			t.Errorf("expected 'disabled' in error, got: %v (out: %q)", err, out)
 		}
-		entries, _ := os.ReadDir(filepath.Join(workspacesDir, "_archive"))
-		found := false
-		for _, e := range entries {
-			if strings.HasPrefix(e.Name(), "feature1@") {
-				found = true
-			}
-		}
-		if !found {
-			t.Errorf("expected _archive/feature1@<date>, entries = %v", entries)
+		// workspace must be left in place — nothing moved
+		if _, statErr := os.Stat(wsPath); statErr != nil {
+			t.Errorf("expected workspace dir to remain, stat err = %v", statErr)
 		}
 	})
 }
