@@ -112,28 +112,17 @@ func getDefaultBranch(bareRepoPath string, config Config) (string, error) {
 	return strings.TrimSpace(out), nil
 }
 
-func addWorktree(bareRepoPath string, worktreeDest string, branch string, config Config) error {
-
-	Log(LogLevelNormal, "Creating worktree: %v branch: %v\n", worktreeDest, branch)
+func addWorktree(bareRepoPath string, worktreeDest string, config Config) error {
 
 	defaultBranch, err := getDefaultBranch(bareRepoPath, config)
 	if err != nil {
 		return err
 	}
 
-	_, err = execGitCommand(config, "-C", bareRepoPath,
-		"rev-parse", "--verify", branch)
+	Log(LogLevelNormal, "Creating worktree: %v detached at: %v\n", worktreeDest, defaultBranch)
 
-	if err != nil {
-		// branch does not exist, create with tracking
-		_, err = execGitCommand(config, "-C", bareRepoPath,
-			"worktree", "add", worktreeDest, "-b", branch, defaultBranch)
-		return err
-	}
-
-	// branch exists, check out
 	_, err = execGitCommand(config, "-C", bareRepoPath,
-		"worktree", "add", worktreeDest, branch)
+		"worktree", "add", "--detach", worktreeDest, defaultBranch)
 	return err
 }
 
@@ -141,6 +130,16 @@ func isWorktreeDirty(worktreePath string, config Config) (bool, error) {
 
 	out, err := execGitCommand(config, "-C", worktreePath,
 		"status", "--porcelain")
+	if err != nil {
+		return false, err
+	}
+
+	return strings.TrimSpace(out) != "", nil
+}
+
+func hasOrphanCommits(worktreePath string, config Config) (bool, error) {
+
+	out, err := execGitCommand(config, "-C", worktreePath, "rev-list", "HEAD", "--not", "--branches", "--remotes", "--tags")
 	if err != nil {
 		return false, err
 	}

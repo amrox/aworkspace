@@ -19,7 +19,6 @@ type Config struct {
 	BaresDir       string `toml:"bares_dir"`
 	WorkspacesDir  string `toml:"workspaces_dir"`
 	WorktreeSubdir string `toml:"workspace_worktree_subdir"`
-	BranchPrefix   string `toml:"branch_prefix"`
 
 	Git GitConfig `toml:"git"`
 
@@ -59,7 +58,6 @@ func DefaultConfig() Config {
 		WorkspacesDir:  filepath.Join(homeDir(), "Workspaces"),
 		BaresDir:       DefaultBaresPath(),
 		WorktreeSubdir: "code",
-		BranchPrefix:   "",
 	}
 }
 

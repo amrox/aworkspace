@@ -33,7 +33,6 @@ func createTestWorkspace(t *testing.T, name string) (Workspace, Config) {
 		WorkspacesDir:  wsDir,
 		BaresDir:       t.TempDir(),
 		WorktreeSubdir: "code",
-		BranchPrefix:   "", // docs: default is no prefix (branch name = workspace name)
 	}
 
 	err := CreateWorkspaceRoot(wsDir, config)
@@ -75,7 +74,7 @@ func TestAddRepoIntegration(t *testing.T) {
 		ws, config := createTestWorkspace(t, "test-ws")
 
 		remoteRepo := createTestRepo(t)
-		err := ws.AddRepo(remoteRepo, "", config)
+		err := ws.AddRepo(remoteRepo, config)
 		if err != nil {
 			t.Fatalf("AddRepo: %v", err)
 		}
@@ -107,7 +106,7 @@ func TestAddRepoIntegration(t *testing.T) {
 			t.Fatalf("ensureBareRepo: %v", err)
 		}
 
-		err = ws.AddRepo(remoteRepo, "", config)
+		err = ws.AddRepo(remoteRepo, config)
 		if err != nil {
 			t.Fatalf("AddRepo: %v", err)
 		}
@@ -116,51 +115,70 @@ func TestAddRepoIntegration(t *testing.T) {
 		verifyWorktree(t, ws, config, remoteRepoName)
 	})
 
-	t.Run("happy path - with existing remote branch", func(t *testing.T) {
+	t.Run("worktree is detached at the default branch", func(t *testing.T) {
 
 		ws, config := createTestWorkspace(t, "test-ws")
 
 		remoteRepo := createTestRepo(t)
-
-		// create a branch matching our ws branch
-		err := exec.Command("git", "-C", remoteRepo, "branch", defaultBranchName(ws, config)).Run()
-		if err != nil {
-			t.Fatalf("git remote branch creation failed: %v", err)
-		}
-
-		err = ws.AddRepo(remoteRepo, "", config)
-		if err != nil {
+		if err := ws.AddRepo(remoteRepo, config); err != nil {
 			t.Fatalf("AddRepo: %v", err)
 		}
 
-		remoteRepoName := filepath.Base(remoteRepo)
-		verifyWorktree(t, ws, config, remoteRepoName)
+		repoName := filepath.Base(remoteRepo)
+		verifyWorktree(t, ws, config, repoName)
+
+		wt := ws.WorktreePath(repoName)
+
+		// HEAD is detached — no branch is created under the no-branch model
+		if err := exec.Command("git", "-C", wt, "symbolic-ref", "-q", "HEAD").Run(); err == nil {
+			t.Errorf("expected detached HEAD in worktree, but HEAD is on a branch")
+		}
+
+		// ...and it points at the bare's default branch commit
+		bare := filepath.Join(config.BaresDir, "_", remoteRepo)
+		defaultRef, err := getDefaultBranch(bare, config)
+		if err != nil {
+			t.Fatalf("getDefaultBranch: %v", err)
+		}
+		wantOut, err := exec.Command("git", "-C", bare, "rev-parse", defaultRef).Output()
+		if err != nil {
+			t.Fatalf("rev-parse default: %v", err)
+		}
+		gotOut, err := exec.Command("git", "-C", wt, "rev-parse", "HEAD").Output()
+		if err != nil {
+			t.Fatalf("rev-parse HEAD: %v", err)
+		}
+		if got, want := strings.TrimSpace(string(gotOut)), strings.TrimSpace(string(wantOut)); got != want {
+			t.Errorf("worktree HEAD = %q, want default branch %q", got, want)
+		}
 	})
 
-	t.Run("happy path - with existing local branch", func(t *testing.T) {
+	t.Run("two workspaces can add the same repo", func(t *testing.T) {
 
-		// this is a weird case - existing branch with no existing worktree - but it should succeed
+		// No branch per worktree means git never refuses a shared branch — two
+		// workspaces back onto the same bare, each detached at the default branch.
 
-		ws, config := createTestWorkspace(t, "test-ws")
-
+		ws1, config := createTestWorkspace(t, "ws-one")
 		remoteRepo := createTestRepo(t)
-
-		// pre-add bare clone
-		localBare, err := ensureBareRepo(remoteRepo, config)
-
-		// create a branch matching our ws branch
-		err = exec.Command("git", "-C", localBare, "branch", defaultBranchName(ws, config)).Run()
-		if err != nil {
-			t.Fatalf("git local branch creation failed: %v", err)
+		if err := ws1.AddRepo(remoteRepo, config); err != nil {
+			t.Fatalf("AddRepo ws1: %v", err)
 		}
 
-		err = ws.AddRepo(remoteRepo, "", config)
+		ws2, err := CreateWorkspace("ws-two", config)
 		if err != nil {
-			t.Fatalf("AddRepo: %v", err)
+			t.Fatalf("CreateWorkspace ws2: %v", err)
+		}
+		ws2, err = LoadWorkspace(ws2.Path)
+		if err != nil {
+			t.Fatalf("LoadWorkspace ws2: %v", err)
+		}
+		if err := ws2.AddRepo(remoteRepo, config); err != nil {
+			t.Fatalf("AddRepo ws2: %v", err)
 		}
 
-		remoteRepoName := filepath.Base(remoteRepo)
-		verifyWorktree(t, ws, config, remoteRepoName)
+		repoName := filepath.Base(remoteRepo)
+		verifyWorktree(t, ws1, config, repoName)
+		verifyWorktree(t, ws2, config, repoName)
 	})
 
 	t.Run("failure - bogus remote", func(t *testing.T) {
@@ -169,49 +187,12 @@ func TestAddRepoIntegration(t *testing.T) {
 
 		remoteRepo := t.TempDir()
 
-		err := ws.AddRepo(remoteRepo, "", config)
+		err := ws.AddRepo(remoteRepo, config)
 		if err == nil {
 			t.Fatalf("AddRepo: expected error, got <nil>")
 		}
 	})
 
-	t.Run("errors when branch is checked out in another worktree", func(t *testing.T) {
-
-		// Per docs: when the workspace branch already exists AND is checked out in
-		// another worktree (git forbids sharing a branch across worktrees), AddRepo
-		// does NOT auto-rename — it errors. This is an exceptional, usually-dirty
-		// state; aworkspace shouts rather than silently inventing a new branch name.
-
-		ws, config := createTestWorkspace(t, "test-ws")
-
-		remoteRepo := createTestRepo(t)
-
-		// pre-add bare clone
-		localBare, err := ensureBareRepo(remoteRepo, config)
-		if err != nil {
-			t.Fatalf("ensureBareRepo: %v", err)
-		}
-
-		// occupy the workspace branch with a worktree elsewhere so git refuses to reuse it
-		branch := defaultBranchName(ws, config)
-		occupied := t.TempDir()
-		err = exec.Command("git", "-C", localBare, "worktree", "add", occupied, "-B", branch).Run()
-		if err != nil {
-			t.Fatalf("git worktree creation failed: %v", err)
-		}
-
-		err = ws.AddRepo(remoteRepo, "", config)
-		if err == nil {
-			t.Fatalf("AddRepo: expected error (branch %q checked out elsewhere), got <nil>", branch)
-		}
-
-		// and it must not leave a half-created worktree behind
-		repoName := filepath.Base(remoteRepo)
-		worktreePath := filepath.Join(ws.Path, config.WorktreeSubdir, repoName)
-		if _, statErr := os.Stat(worktreePath); statErr == nil {
-			t.Errorf("AddRepo left a worktree at %q after erroring", worktreePath)
-		}
-	})
 
 	t.Run("ensureBareRepo set refspec", func(t *testing.T) {
 		remoteRepo := createTestRepo(t)

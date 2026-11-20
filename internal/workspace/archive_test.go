@@ -4,7 +4,6 @@ package workspace
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -40,10 +39,10 @@ func addDirtyFile(t *testing.T, ws Workspace, config Config, repoName string) {
 
 func TestArchiveIntegration(t *testing.T) {
 
-	t.Run("clean archive: moves record under name@date, detaches worktree, keeps branch", func(t *testing.T) {
+	t.Run("clean archive: moves record under name@date, detaches worktree", func(t *testing.T) {
 		ws, config := createTestWorkspace(t, "feature1")
 		remoteRepo := createTestRepo(t)
-		if err := ws.AddRepo(remoteRepo, "", config); err != nil {
+		if err := ws.AddRepo(remoteRepo, config); err != nil {
 			t.Fatalf("AddRepo: %v", err)
 		}
 		repoName := filepath.Base(remoteRepo)
@@ -75,20 +74,12 @@ func TestArchiveIntegration(t *testing.T) {
 		if _, err := os.Stat(archivedWorktree); !os.IsNotExist(err) {
 			t.Errorf("expected worktree %q absent in archive, stat err = %v", archivedWorktree, err)
 		}
-		// A1: branch still lives in the bare (shared content untouched)
-		bare, err := ensureBareRepo(remoteRepo, config)
-		if err != nil {
-			t.Fatalf("ensureBareRepo: %v", err)
-		}
-		if err := exec.Command("git", "-C", bare, "rev-parse", "--verify", "feature1").Run(); err != nil {
-			t.Errorf("expected branch 'feature1' to remain in bare after archive: %v", err)
-		}
 	})
 
 	t.Run("dirty archive without --force: errors and moves nothing", func(t *testing.T) {
 		ws, config := createTestWorkspace(t, "feature2")
 		remoteRepo := createTestRepo(t)
-		if err := ws.AddRepo(remoteRepo, "", config); err != nil {
+		if err := ws.AddRepo(remoteRepo, config); err != nil {
 			t.Fatalf("AddRepo: %v", err)
 		}
 		addDirtyFile(t, ws, config, filepath.Base(remoteRepo))
@@ -112,7 +103,7 @@ func TestArchiveIntegration(t *testing.T) {
 	t.Run("dirty archive with --force: proceeds", func(t *testing.T) {
 		ws, config := createTestWorkspace(t, "feature3")
 		remoteRepo := createTestRepo(t)
-		if err := ws.AddRepo(remoteRepo, "", config); err != nil {
+		if err := ws.AddRepo(remoteRepo, config); err != nil {
 			t.Fatalf("AddRepo: %v", err)
 		}
 		addDirtyFile(t, ws, config, filepath.Base(remoteRepo))

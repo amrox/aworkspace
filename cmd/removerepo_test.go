@@ -47,7 +47,7 @@ func setupWSWithRepo(t *testing.T, wsName string) (string, string, workspace.Con
 		t.Fatalf("LoadWorkspace: %v", err)
 	}
 	repo := gitInitRepo(t)
-	if err := ws.AddRepo(repo, "", config); err != nil {
+	if err := ws.AddRepo(repo, config); err != nil {
 		t.Fatalf("AddRepo: %v", err)
 	}
 	return ws.Path, filepath.Base(repo), config
