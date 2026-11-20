@@ -10,7 +10,7 @@ Working across multiple repositories on a single feature or initiative is cumber
 
 ## How It Works
 
-aworkspace uses **git worktrees** to create isolated working directories for each workspace. All repos are stored as bare clones in a central location, and each workspace gets its own worktrees with dedicated branches.
+aworkspace uses **git worktrees** to create isolated working directories for each workspace. All repos are stored as bare clones in a central location, and each workspace gets its own worktrees, each detached at the repo's default branch.
 
 ```
 ~/.local/share/aworkspace/repos/   # Bare clones (shared)
@@ -23,8 +23,8 @@ aworkspace uses **git worktrees** to create isolated working directories for eac
     WORKSPACE.md                   # Goals, context, notes
     CLAUDE.md                      # Agent instructions
     code/
-      repo-a/                      # Worktree (branch: my-feature)
-      repo-b/                      # Worktree (branch: my-feature)
+      repo-a/                      # Worktree
+      repo-b/                      # Worktree
 ```
 
 ## Installation
@@ -83,7 +83,7 @@ Show details about a workspace (repos and their URLs). Infers workspace from cur
 
 ### `aworkspace add-repo <url>`
 
-Add a repository to the current workspace. Creates a bare clone (if needed) and a worktree on a branch named after the workspace (e.g. workspace `my-feature` → branch `my-feature`). Prints the branch name and whether it was created or reused.
+Add a repository to the current workspace. Creates a bare clone (if needed) and a worktree detached at the repo's default branch.
 
 **Examples:**
 ```bash
@@ -116,15 +116,15 @@ aworkspace cd my-feature    # cd to ~/Workspaces/my-feature
 
 ### PLANNED: `aworkspace new --from <workspace>`
 
-Clone an existing workspace's repo list with fresh branches.
+Clone an existing workspace
 
 ### PLANNED: `aworkspace list -l`
 
-Detailed list format (repo count, branches, dirty state).
+Detailed list format (repo count, worktrees, etc).
 
 ### PLANNED: `aworkspace archive <workspace>`
 
-Archive a workspace (safe by default): detaches its worktrees, keeps the record (`.aworkspace.toml`, `WORKSPACE.md`, notes), and moves it to `_archive/<name>@<date>/` (e.g. `_archive/my-feature@2026-06-30/`). Never deletes shared content — the workspace's branches stay in the bare repos for later rehydrate (branch cleanup is `prune`'s job).
+Archive a workspace (safe by default): detaches its worktrees, keeps the record (`.aworkspace.toml`, `WORKSPACE.md`, notes), and moves it to `_archive/<name>@<date>/` (e.g. `_archive/my-feature@2026-06-30/`). Never deletes shared content — the bare repos stay intact for later rehydrate.
 
 Requires the workspace name — it does not infer from the current directory. Refuses if your shell's cwd is at or under the target workspace (`cd` out first), so archiving never moves the directory out from under you.
 
@@ -132,21 +132,13 @@ Requires the workspace name — it does not infer from the current directory. Re
 
 - `--force` — skip confirmation.
 
-A clean worktree archives with no prompt. A worktree with **uncommitted or untracked** changes archives only after confirmation (or `--force`), since those changes exist nowhere else. Committed work — pushed or not — is preserved on the kept branch.
+A clean worktree archives with no prompt. A worktree with **uncommitted or untracked** changes — or **commits on no branch** — archives only after confirmation (or `--force`), since that work is reachable from no ref and exists nowhere else. Commits reachable from a branch, tag, or remote are preserved in the bare repo.
 
 To actually delete an archived workspace, remove its folder directly (`rm -rf _archive/<name>@<date>`) — it's a plain folder. A tool-provided destroyer command is planned for a later release.
 
 ### PLANNED: `aworkspace prune`
 
 Find and remove bare repos that aren't referenced by any workspace.
-
-### PLANNED: `aworkspace update`
-
-Fetch and rebase workspace branches onto their base branch. Skips repos with uncommitted changes.
-
-### PLANNED: `aworkspace reset`
-
-Reset workspace to a clean state. Skips dirty repos unless `--force` is used.
 
 ### PLANNED: `aworkspace doctor`
 
@@ -160,7 +152,6 @@ Config file: `~/.config/aworkspace/config.toml`
 workspaces_dir = "~/Workspaces"
 bares_dir = "~/.local/share/aworkspace/repos"
 workspace_worktree_subdir = "code"
-branch_prefix = ""
 
 [git]
 path = "/usr/local/bin/git"  # custom git binary (default: "git")
@@ -171,7 +162,6 @@ path = "/usr/local/bin/git"  # custom git binary (default: "git")
 - `workspaces_dir` — Where workspaces are created (default: `~/Workspaces`)
 - `bares_dir` — Where bare clones are stored (default: `~/.local/share/aworkspace/repos`)
 - `workspace_worktree_subdir` — Subdirectory within workspace for worktrees (default: `"code"`)
-- `branch_prefix` — Optional prefix for workspace branches (default: `""` — branch name = workspace name)
 
 ### PLANNED: Bookmarks
 
@@ -196,33 +186,11 @@ aworkspace add-repo my-tool              # -> git@github.com:amrox/my-tool.git
 aworkspace add-repo work:gitlab-runners  # -> git@gitlab.company.com:team-infra/gitlab-runners.git
 ```
 
-## Branch Naming
+## Branch model
 
-By default, the branch is **named after the workspace** — the same name in every repo of the workspace, with no prefix. Workspace `my-feature` → branch `my-feature`.
+Worktrees start **detached** at each repo's default branch — aworkspace creates no branch. Git allows a branch to be checked out in only one worktree, and all workspaces share one bare repo per remote, so a starting point many workspaces can share must be detached.
 
-The branch name describes *the work*, not the plumbing. Because the local branch name matches the remote name, there's no translation when you push or open a PR — `git push` just works, and the base branch (what you forked from) is recorded as metadata, not baked into the name.
-
-**Creating or reusing a branch** (aworkspace always tells you which):
-- Branch doesn't exist → created from the base branch.
-- Branch exists but isn't checked out elsewhere → reused (the worktree attaches to it).
-- Branch exists and is already checked out in another worktree → **error.** This is an exceptional case (workspace names are unique and teardown is clean, so it usually means a stale worktree left behind). aworkspace won't silently invent a different branch name; it tells you which worktree holds the branch. Pass an explicit branch (`add-repo <url> <branch>`) or clean up with `doctor`/`prune`.
-
-```
-workspace 'fix-auth'
-  api     → branch fix-auth (new, from main)
-  shared  → branch fix-auth (reusing existing)
-```
-
-**Optional prefix.** If you want workspace branches namespaced (e.g. to identify them in CI or match a team convention), set a prefix:
-
-```toml
-# config.toml
-branch_prefix = ""        # default: branch name = workspace name
-# branch_prefix = "ws/"   # namespaced: my-feature → ws/my-feature
-# branch_prefix = "aw-"   # flat prefix: my-feature → aw-my-feature
-```
-
-Note that any prefix reintroduces a local/remote name difference, so leaving it empty is recommended unless you specifically need the namespace.
+Create a branch yourself when you're ready (`git switch -c <name>`). `archive` and `remove-repo` treat commits on no branch as unsafe — they're reachable from no ref and would be lost — so they require confirmation or `--force`.
 
 ## Workspace Structure
 
