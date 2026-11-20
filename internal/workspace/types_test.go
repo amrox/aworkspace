@@ -123,11 +123,6 @@ func TestDefaultConfig(t *testing.T) {
 	if config.BaresDir != expectedReposDir {
 		t.Errorf("BaresDir = %v, want %v", config.BaresDir, expectedReposDir)
 	}
-
-	// Check BranchPrefix — per docs the default is empty (branch name = workspace name)
-	if config.BranchPrefix != "" {
-		t.Errorf("BranchPrefix = %q, want \"\" (branch name = workspace name)", config.BranchPrefix)
-	}
 }
 
 func TestLoadConfigFromBytes(t *testing.T) {
@@ -147,10 +142,10 @@ func TestLoadConfigFromBytes(t *testing.T) {
 	})
 
 	t.Run("partial input merges with defaults", func(t *testing.T) {
-		customPrefix := "qqq/"
+		customSubdir := "src"
 		doc := fmt.Sprintf(`
-			branch_prefix = "%s"
-		`, customPrefix)
+			workspace_worktree_subdir = "%s"
+		`, customSubdir)
 		defaultConfig := DefaultConfig()
 
 		config, err := LoadConfigFromBytes([]byte(doc))
@@ -158,8 +153,8 @@ func TestLoadConfigFromBytes(t *testing.T) {
 			t.Fatalf("LoadConfigFromBytes returned unexpected error: %v:", err)
 		}
 
-		if config.BranchPrefix != customPrefix {
-			t.Errorf("BranchPrefix = %v, want %v", config.BranchPrefix, customPrefix)
+		if config.WorktreeSubdir != customSubdir {
+			t.Errorf("WorktreeSubdir = %v, want %v", config.WorktreeSubdir, customSubdir)
 		}
 
 		if config.BaresDir != defaultConfig.BaresDir {

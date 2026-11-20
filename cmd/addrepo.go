@@ -11,9 +11,9 @@ func init() {
 }
 
 var addRepoCmd = &cobra.Command{
-	Use: "add-repo",
+	Use:   "add-repo",
 	Short: "Add a repo to this workspace",
-	Args: cobra.ExactArgs(1),
+	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		repoURL := args[0]
 
@@ -32,7 +32,7 @@ var addRepoCmd = &cobra.Command{
 			return err
 		}
 
-		err = ws.AddRepo(repoURL, "", *cfg)
+		err = ws.AddRepo(repoURL, *cfg)
 		if err != nil {
 			return err
 		}

@@ -256,15 +256,11 @@ func ListWorkspaces(config Config) ([]Workspace, error) {
 	return workspaces, nil
 }
 
-func defaultBranchName(workspace Workspace, config Config) string {
-	return config.BranchPrefix + workspace.Name()
-}
-
 func (ws *Workspace) WorktreePath(repoName string) string {
 	return filepath.Join(ws.Path, ws.Metadata.Root.WorktreeSubdir, repoName)
 }
 
-func (ws *Workspace) AddRepo(repoURL string, branch string, config Config) error {
+func (ws *Workspace) AddRepo(repoURL string, config Config) error {
 
 	for k := range ws.Metadata.Repos {
 		if ws.Metadata.Repos[k].URL == repoURL {
@@ -282,10 +278,6 @@ func (ws *Workspace) AddRepo(repoURL string, branch string, config Config) error
 		return err
 	}
 
-	if branch == "" {
-		branch = defaultBranchName(*ws, config)
-	}
-
 	// TODO: handle conflicting worktree paths
 	workTreeDest := ws.WorktreePath(repo.Name)
 	success := false
@@ -295,7 +287,7 @@ func (ws *Workspace) AddRepo(repoURL string, branch string, config Config) error
 		}
 	}()
 
-	err = addWorktree(bareRepoPath, workTreeDest, branch, config)
+	err = addWorktree(bareRepoPath, workTreeDest, config)
 	if err != nil {
 		return err
 	}
@@ -324,6 +316,18 @@ func (ws *Workspace) RemoveRepo(repoName string, removeOpts RemoveRepoOptions, c
 	repo, err := parseRepoURL(rc.URL)
 	if err != nil {
 		return err
+	}
+
+	if !removeOpts.Force {
+		wtPath := ws.WorktreePath(repoName)
+		hasOrphans, err := hasOrphanCommits(wtPath, config)
+		if err != nil {
+			return err
+		}
+
+		if hasOrphans {
+			return fmt.Errorf("worktree %q has commits on no branch (will be lost); run 'git -C \"%s\" branch <name>' to keep them, or pass --force to discard", wtPath, wtPath)
+		}
 	}
 
 	err = removeWorktree(repo.bareRepoPath(config), ws.WorktreePath(repoName), removeOpts.Force, config)
@@ -381,22 +385,39 @@ type ArchiveOptions struct {
 
 func (ws *Workspace) Archive(archiveOptions ArchiveOptions, config Config) (string, error) {
 
-	// -- Step 0: Dirty Gate
+	// -- Step 0: Gates
 
-	var dirtyRepos []string
-	for name := range ws.Metadata.Repos {
-		dirty, err := isWorktreeDirty(ws.WorktreePath(name), config)
-		if err != nil {
-			return "", err
+	if !archiveOptions.Force {
+
+		blocked := false
+		for name := range ws.Metadata.Repos {
+
+			wtPath := ws.WorktreePath(name)
+
+			dirty, err := isWorktreeDirty(wtPath, config)
+			if err != nil {
+				return "", err
+			}
+
+			if dirty {
+				LogWarning("worktree %q is dirty; commit or discard changes", wtPath)
+			}
+
+			hasOrphans, err := hasOrphanCommits(wtPath, config)
+			if err != nil {
+				return "", err
+			}
+
+			if hasOrphans {
+				LogWarning("worktree %q has commits on no branch (will be lost); run 'git -C \"%s\" branch <name>' to keep them", wtPath, wtPath)
+			}
+
+			blocked = blocked || dirty || hasOrphans
 		}
 
-		if dirty {
-			dirtyRepos = append(dirtyRepos, name)
+		if blocked {
+			return "", fmt.Errorf("one or more worktrees not safe to archive; resolve issues or pass --force")
 		}
-	}
-
-	if len(dirtyRepos) > 0 && !archiveOptions.Force {
-		return "", fmt.Errorf("dirty worktrees (use --force): %s", strings.Join(dirtyRepos, ", "))
 	}
 
 	// -- Step 1: Capture state
