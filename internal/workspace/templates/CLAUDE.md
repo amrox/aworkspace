@@ -12,8 +12,10 @@ a single initiative. Each worktree is a subdirectory which may have its own
 - Use `WORKSPACE.md` as the source of truth for what this workspace is about.
 - Only work within worktrees in this directory — do not modify files outside
   the workspace or in other workspaces.
-- Repos in this workspace are independent projects — do not cross-reference
-  between them. No repo should import, symlink, or refer to paths in another.
+- Repos in this workspace are separate checkouts of independent projects. Do
+  not link them on disk: no symlinks, imports, or relative paths from one
+  worktree into another. Referring to another repo by name or URL in code and
+  docs is fine.
 - These are git worktrees, not standalone clones. Do not run `git init`,
   `git clone`, or re-clone repos that are already here.
 - Commit and push each repo independently.
