@@ -1,8 +1,10 @@
 package workspace
 
 import (
+	"bufio"
 	"bytes"
 	_ "embed"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -377,6 +379,114 @@ func CreateWorkspaceRoot(path string, config Config) error {
 
 	wsRootMetaPath := filepath.Join(wsRootMetaDirPath, workspaceRootMetaFile)
 	return writeMetadataFile(wsRootMetaPath, meta)
+}
+
+type Worktree struct {
+	Path     string
+	HEAD     string
+	Branch   string // "" if detached
+	Bare     bool
+	Prunable bool
+}
+
+func parseWorktreeList(out string) []Worktree {
+
+	// EXAMPLE:
+	//
+	// ❯ git -C /Users/amrox/.local/share/aworkspace/repos/github.com/amrox/dotfiles/worktrees/dotfiles1 worktree list --porcelain
+	// worktree /Users/amrox/.local/share/aworkspace/repos/github.com/amrox/dotfiles
+	// bare
+	//
+	// worktree /Users/amrox/Workspaces/hi/code/dotfiles
+	// HEAD fbb7487ee3d69ee86cfe75e83febca1858f6d3b4
+	// branch refs/heads/ws/hi
+	// prunable gitdir file points to non-existent location
+	//
+	// worktree /Users/amrox/Workspaces/test1/code/dotfiles
+	// HEAD 019a06151d0e0fdcc8870dacb967623493400712
+	// branch refs/heads/ws/test1
+
+	var wts []Worktree
+	var cur *Worktree
+	flush := func() {
+		if cur != nil {
+			wts = append(wts, *cur)
+			cur = nil
+		}
+	}
+
+	sc := bufio.NewScanner(strings.NewReader(out))
+	for sc.Scan() {
+		line := sc.Text()
+		if line == "" {
+			flush()
+			continue
+		}
+		key, rest, _ := strings.Cut(line, " ")
+		switch key {
+		case "worktree":
+			flush()
+			cur = &Worktree{Path: rest}
+		case "HEAD":
+			cur.HEAD = rest
+		case "branch":
+			cur.Branch = strings.TrimPrefix(rest, "refs/heads/")
+		case "bare":
+			cur.Bare = true
+		case "prunable":
+			cur.Prunable = true
+		}
+	}
+	flush()
+	return wts
+}
+
+func (ws *Workspace) WorktreesByRepo(config Config) (map[string][]Worktree, error) {
+
+	worktreeMap := make(map[string][]Worktree)
+
+	for name, rc := range ws.Metadata.Repos {
+
+		repo, err := parseRepoURL(rc.URL)
+		if err != nil {
+			return nil, err
+		}
+
+		repoPath := repo.bareRepoPath(config)
+
+		if _, err := os.Stat(repoPath); errors.Is(err, os.ErrNotExist) {
+			worktreeMap[name] = nil // repo in metadata, no bare on disk -> no worktrees here
+			continue
+		} else if err != nil {
+			return nil, err
+		}
+
+		out, err := execGitCommand(config, "-C", repoPath, "worktree", "list", "--porcelain")
+		if err != nil {
+			return nil, err
+		}
+
+		allWorktrees := parseWorktreeList(out)
+		var myWorktrees []Worktree
+
+		for _, wtree := range allWorktrees {
+			if wtree.Bare || wtree.Prunable {
+				continue
+			}
+
+			under, err := isUnderDir(ws.Path, wtree.Path)
+			if err != nil {
+				return nil, err
+			}
+			if under {
+				myWorktrees = append(myWorktrees, wtree)
+			}
+		}
+
+		worktreeMap[name] = myWorktrees
+	}
+
+	return worktreeMap, nil
 }
 
 type ArchiveOptions struct {
