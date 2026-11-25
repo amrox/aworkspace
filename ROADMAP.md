@@ -69,6 +69,8 @@ The convention cannot be relied on — an agent's built-in worktree feature may 
 
 **`update` (0.2), open:** for a repo with no branch and no local commits, re-detach at the freshly fetched default branch. Repos on a branch are the user's to rebase; the tool may fetch only.
 
+**Healing old bares (decided — `update` repairs, `doctor` reports).** A bare needs the fetch mapping (`remote.origin.fetch = +refs/heads/*:refs/remotes/origin/*`) and `origin/HEAD`; without them `origin/<branch>` does not exist in its worktrees and the default branch cannot be resolved. `git clone --bare` sets up neither. `add-repo` sets both on every run, for a new or an existing bare, but nothing else does, so a bare made by an older build stays broken until `add-repo` touches that repo again. `update` runs the same setup before it fetches, so it heals as a side effect. `doctor` checks each bare and reports, without changing anything. `prune` depends on this: its unpushed-commit check compares local branches with remote-tracking refs, so a bare with no mapping reports every branch as unpushed.
+
 **Earlier designs, set aside** (all assumed one task per workspace; details are in git history): a `ws/<workspace>` prefix; a branch named after the workspace (git's own precedent: `git worktree add <path>` names the branch after the path's basename) with reuse/error collision handling; and a per-branch git marker recording ownership.
 
 **Open question (0.1 decision required):** Workspace context file naming. Options:
@@ -388,7 +390,7 @@ Goal: Get the basic workspace management working. Create, list, and manage works
 - [ ] Archive index — stamp frontmatter into the record + write/regenerate `_archive/INDEX.md` ledger (`archive reindex`); `list --archived`
 - [ ] File-handling conventions — generate default `.gitignore` (worktree subdir + `tmp/` + `secrets/`), archive-exclude `tmp/`/`code/`, keep-but-ignore `secrets/` with size + secrets warnings
 - [ ] `aworkspace prune` for orphaned bare repos (global GC, never a side effect of `archive`) — detects unpushed commits before deleting a bare; confirm/`--force`, never a hard block. See "prune: unpushed-commit detection" above.
-- [ ] `aworkspace update` — fetch; move untouched no-branch repos to the new default-branch tip. Repos on a branch are the user's to rebase (open, see "Branch model").
+- [ ] `aworkspace update` — fetch; move untouched no-branch repos to the new default-branch tip. Repos on a branch are the user's to rebase (open, see "Branch model"). Before fetching, set the fetch mapping and `origin/HEAD` on each bare (the same setup `add-repo` does), so bares made by older builds heal. See "Healing old bares".
 - [ ] `aworkspace reset` — reset workspace to clean state
 - [ ] Bookmarks for common git hosts
 - [ ] `new --from <workspace>` — seed a new workspace from a live, archived or template workspace (seeded copy, no link). See "Seeding: `new --from`" above.
@@ -399,6 +401,7 @@ Goal: Get the basic workspace management working. Create, list, and manage works
 ## Milestone 0.3 - Quality of Life
 
 - [ ] `aworkspace doctor` — environment checks
+  - Bare repo health (report only): fetch mapping present, `origin/HEAD` set. Points the user at `update` to repair. See "Healing old bares".
 - [ ] Better git URL parsing (support all formats)
 - [ ] Homebrew formula
 - [ ] **Rich `list` output** — flexible formatting like `ls -l`
