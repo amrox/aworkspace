@@ -495,31 +495,40 @@ type ArchiveOptions struct {
 
 func (ws *Workspace) Archive(archiveOptions ArchiveOptions, config Config) (string, error) {
 
+	worktreeMap, err := ws.WorktreesByRepo(config)
+	if err != nil {
+		return "", err
+	}
+
+	var allWorktrees []Worktree
+	for _, wts := range worktreeMap {
+		allWorktrees = append(allWorktrees, wts...)
+	}
+
 	// -- Step 0: Gates
 
 	if !archiveOptions.Force {
 
 		blocked := false
-		for name := range ws.Metadata.Repos {
 
-			wtPath := ws.WorktreePath(name)
+		for _, wt := range allWorktrees {
 
-			dirty, err := isWorktreeDirty(wtPath, config)
+			dirty, err := isWorktreeDirty(wt.Path, config)
 			if err != nil {
 				return "", err
 			}
 
 			if dirty {
-				LogWarning("worktree %q is dirty; commit or discard changes", wtPath)
+				LogWarning("worktree %q is dirty; commit or discard changes", wt.Path)
 			}
 
-			hasOrphans, err := hasOrphanCommits(wtPath, config)
+			hasOrphans, err := hasOrphanCommits(wt.Path, config)
 			if err != nil {
 				return "", err
 			}
 
 			if hasOrphans {
-				LogWarning("worktree %q has commits on no branch (will be lost); run 'git -C \"%s\" branch <name>' to keep them", wtPath, wtPath)
+				LogWarning("worktree %q has commits on no branch (will be lost); run 'git -C \"%s\" branch <name>' to keep them", wt.Path, wt.Path)
 			}
 
 			blocked = blocked || dirty || hasOrphans
@@ -530,9 +539,23 @@ func (ws *Workspace) Archive(archiveOptions ArchiveOptions, config Config) (stri
 		}
 	}
 
-	// -- Step 1: Capture state
+	// -- Step 1: Detach worktrees
 
-	worktreeSubdir := ws.Metadata.Root.WorktreeSubdir
+	// NOTE: This is NOT atomic. If a removeWorktree call fails, it can leave the workspace in a half-archived state
+	// Unfortunately, there is not an easy way to handle this, so punting for now.
+
+	for name, wts := range worktreeMap {
+		repo, err := parseRepoURL(ws.Metadata.Repos[name].URL)
+		if err != nil {
+			return "", err
+		}
+		bare := repo.bareRepoPath(config)
+		for _, wt := range wts {
+			if err := removeWorktree(bare, wt.Path, archiveOptions.Force, config); err != nil {
+				return "", err
+			}
+		}
+	}
 
 	// -- Step 2: Move workspace to _archive dir
 
@@ -556,21 +579,6 @@ func (ws *Workspace) Archive(archiveOptions ArchiveOptions, config Config) (stri
 
 	if err := os.Rename(ws.Path, dest); err != nil {
 		return "", err
-	}
-
-	// -- Step 3: drop worktrees from the archive, clear bare bookkeeping
-	if err := os.RemoveAll(filepath.Join(dest, worktreeSubdir)); err != nil {
-		return "", err
-	}
-
-	for _, rc := range ws.Metadata.Repos {
-		repo, err := parseRepoURL(rc.URL)
-		if err != nil {
-			return "", err
-		}
-		if _, err := execGitCommand(config, "-C", repo.bareRepoPath(config), "worktree", "prune"); err != nil {
-			return "", err
-		}
 	}
 
 	return dest, nil
