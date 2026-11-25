@@ -56,7 +56,7 @@ Conventions (recommended, not enforced):
   - When done, commit, then remove it: `git worktree remove code/<repo>--<task>`
   ```
 
-The convention cannot be relied on — an agent's built-in worktree feature may use its own location — so safety comes from discovery, not placement: see "archive: dirty detection" for the scan. A misplaced worktree is untidy, never dangerous.
+The convention cannot be relied on — an agent's built-in worktree feature may use its own location — so safety comes from ownership, not placement: archive discovers owned worktrees by asking each bare what worktrees it owns (see "archive: dirty detection"), so an extra on our bare is handled wherever it sits. A misplaced worktree is untidy, never dangerous.
 
 - **`remove-repo` with extras present:** removes the primary only, leaves the extras, and prints a warning listing them (the archive scan still covers them later).
 - **Later, if missed:** `show` lists extras it finds; a command to create them.
@@ -68,6 +68,8 @@ The convention cannot be relied on — an agent's built-in worktree feature may 
 - A start-a-task helper that creates the same branch name across chosen repos.
 
 **`update` (0.2), open:** for a repo with no branch and no local commits, re-detach at the freshly fetched default branch. Repos on a branch are the user's to rebase; the tool may fetch only.
+
+**Healing old bares (decided — `update` repairs, `doctor` reports).** A bare needs the fetch mapping (`remote.origin.fetch = +refs/heads/*:refs/remotes/origin/*`) and `origin/HEAD`; without them `origin/<branch>` does not exist in its worktrees and the default branch cannot be resolved. `git clone --bare` sets up neither. `add-repo` sets both on every run, for a new or an existing bare, but nothing else does, so a bare made by an older build stays broken until `add-repo` touches that repo again. `update` runs the same setup before it fetches, so it heals as a side effect. `doctor` checks each bare and reports, without changing anything. `prune` depends on this: its unpushed-commit check compares local branches with remote-tracking refs, so a bare with no mapping reports every branch as unpushed.
 
 **Earlier designs, set aside** (all assumed one task per workspace; details are in git history): a `ws/<workspace>` prefix; a branch named after the workspace (git's own precedent: `git worktree add <path>` names the branch after the path's basename) with reuse/error collision handling; and a per-branch git marker recording ownership.
 
@@ -117,6 +119,18 @@ Related rule: **worktrees live in a dedicated, non-empty subdir** (name configur
 
 **Decided:** root config lives at `.aworkspace/meta.toml` within the workspaces root. Required (created by `CreateWorkspaceRoot`).
 
+**Format versioning (decided — minimum):** The on-disk format carries a version stamp so a newer binary can tell an old workspace from a broken one. Motivation: upgrading a consume-only machine across 24 commits left nine workspaces broken or stale (renamed marker file, missing root `meta.toml`, stale generated `CLAUDE.md`), with nothing to detect or repair it.
+
+- **One integer, not semver.** `schema = 1` in the root `meta.toml` and in each `.aworkspace.toml`. A missing stamp means 1; it is written on the next save.
+- **Per-workspace as well as root,** because archived workspaces are frozen at old versions and are loaded later by rehydrate and `new --from`.
+- **Bump only on breaking changes.** Adding a field is not breaking — the TOML loader ignores unknown keys.
+- **The binary reads only the current version.** No "current plus one back" read paths. Older workspaces are *migrated*, not read: each bump adds one small function (v1→v2, v2→v3) and chaining them upgrades any old workspace. No migration code exists until the first breaking change.
+- **Newer than the binary is refused** with one clear message telling the user to upgrade aworkspace. (Matters once two machines sync a journal.)
+- **`list` checks root metadata once,** before loading workspaces, and fails once — not one warning per workspace.
+- The legacy pre-0.1 `workspace.toml` layout is not migrated.
+
+**Deferred (the stale generated-guidance problem):** `new` writes `CLAUDE.md` once and never again, and the file is also user-editable, so the tool can never safely refresh it. Preferred fix when it bites again: split ownership — a tool-owned, re-rendered `AWORKSPACE.md` (refreshed by single-workspace commands, never by `list`/`cd`/completion), a user-owned `CLAUDE.md` stub that imports it, and a `doctor --fix` that migrates formats and swaps unmodified old `CLAUDE.md` files (matched by past-template hash) for the stub. Rendering the guide from metadata is also where per-repo roles and the configurable worktree subdir would surface.
+
 ## Workspace Lifecycle: rm, archive, prune
 
 Design from the 2026-05-29 brainstorm. This is the model behind `rm`/`prune` (see 0.1–0.2 below) and the archive concept.
@@ -158,7 +172,18 @@ Under **A1** — archive never deletes shared *content* (branches/objects/the ba
 
 **One exception — commits on no branch.** Repos start with no branch (see "Branch model" in Design Notes). Commits made before branching exist only in the worktree's HEAD and are orphaned when it is detached, so they count as dirty: `git rev-list HEAD --not --branches --remotes --tags` non-empty → confirm / `--force`. The same check applies to `remove-repo`.
 
-**Scope: every worktree about to be deleted, not only the repos in the metadata.** Archive removes the whole worktree subdir, so the checks must cover everything in it — primaries, extra worktrees (see "Extra worktrees" in Design Notes), nested ones, anything an agent added. Discovery is a scan of the worktree subdir for directories containing a `.git` entry; each one gets the same two checks (uncommitted/untracked, commits on no branch) and is reported by path in the confirm. "Owned or not" is irrelevant: what matters is what is about to be deleted. Nothing else changes — an extra worktree can lose exactly what a primary can, its branches live in the bare and survive, and the existing `git worktree prune` clears its registration. Worktrees outside this workspace are never touched (prune only clears entries whose directory is gone).
+**Scope: ownership, not location.** The governing invariant — same as branches — is *aworkspace manages every worktree on a bare it created, and nothing else.* It never creates branches or commits, so it never deletes them; it does create bares and worktrees, so it detaches those. Ownership, not the `code/` location, drives archive — the `code/` convention can't be relied on (agents place worktrees elsewhere; see "Extra worktrees" in Design Notes), so a location-based rule would be built on sand.
+
+**Discovery is bare-driven, not a filesystem walk.** For each repo in the metadata, take its bare and ask git what worktrees it owns — `git -C <bare> worktree list --porcelain` — then keep the ones whose path is inside this workspace dir. That set is exactly the worktrees we own here: primaries plus any extras an agent created off the same bare (`git worktree add` from inside a primary inherits that primary's common-dir, so the extra is on our bare), wherever they sit. The bare is authoritative for "what are my worktrees," so no `.git` stat, no `rev-parse --git-common-dir` classification, no clone/foreign ambiguity. Foreign worktrees and standalone clones are on bares we did not create, so they never appear in our bares' lists — excluded for free, never discovered, never touched.
+
+- **Owned worktrees** get the two checks (uncommitted/untracked, commits on no branch) as a gate, then on archive are detached with `git worktree remove` — before the workspace dir is moved, while registrations are still valid. Their branches live in the bare and survive.
+- **The workspace-membership filter is load-bearing.** Bares are shared across workspaces, so `worktree list` returns worktrees in *other* workspaces too; keep only those under this workspace dir. Canonicalize both sides (`filepath.EvalSymlinks` + separator-aware prefix, not raw `HasPrefix`) — git reports resolved paths and macOS `/var`→`/private/var` will otherwise mismatch.
+
+There is no "rm the whole worktree subdir" step: archive detaches the worktrees it owns, so the gate scope and the action scope are the same set by construction. After detaching, the leftover folder — the record, plus any non-worktree files and any *foreign* worktrees — is moved to `_archive/` with `os.Rename`.
+
+**Foreign worktrees break on the move — lossless, not clean (honest edge).** Archive doesn't operate on a foreign worktree's git state, but the `os.Rename` of the parent dir moves it on disk, which stales its registration in its own (foreign) bare — exactly like a manual `mv` of a worktree. Files are preserved (no data loss); the worktree→bare link is broken (`git worktree list` in that bare lies; a later `prune` there orphans it); git from inside the moved worktree still works until that bare is pruned. Recoverable with `git worktree repair <moved-path>`. We accept this in the early version: the clean alternatives both cost more than it's worth — *refuse-when-foreign-present* is the gate we deferred, and *repairing/moving* the foreign worktree would be managing one we disclaimed. The deferred foreign **warning + `doctor`** check (see below) is what makes it honest — it tells the user we moved their foreign worktree and to run `git worktree repair`.
+
+**Deferred past the early version (visibility only, no data-loss risk):** detecting foreign worktrees (needs a filesystem walk, since they're not on our bares) to emit the archive-time warning and a `doctor` report. Foreign handling is already *correct* without it — never gated, detached, or repaired — this only *tells* the user what the move did.
 
 Confirmation falls out of "what gets destroyed":
 
@@ -168,14 +193,14 @@ Confirmation falls out of "what gets destroyed":
 
 - Archive is friction-free only for a *clean* worktree; the dirty case has a real destructive edge, which is exactly where the confirm earns its keep.
 - **Never a hard block.** confirm/`--force` is a speed bump proportional to irreversibility, consistent with visibility-never-enforcement.
-- Dirty state is reported **per repo** (which repos, how many uncommitted/untracked), not a workspace-level boolean.
+- Dirty state is reported **per owned worktree** (which path, how many uncommitted/untracked), not a workspace-level boolean.
 
 **Target & cwd:**
 - `archive <name>` **requires the workspace name** — it never infers from the current directory. Inferring would mean standing inside the workspace being archived, which is exactly the unsafe case below.
-- `archive` **refuses when the invoking shell's cwd is at or under the target workspace dir** — the dir is renamed (and the worktree subdir deleted), so the cwd would be moved/deleted out from under the shell, leaving a half-dead state. Tells you to `cd` out first. Precedent: `git branch -d` refuses the checked-out branch; Postgres `DROP DATABASE` refuses the connected database.
+- `archive` **refuses when the invoking shell's cwd is at or under the target workspace dir** — the dir is renamed (and owned worktrees detached), so the cwd would be moved/deleted out from under the shell, leaving a half-dead state. Tells you to `cd` out first. Precedent: `git branch -d` refuses the checked-out branch; Postgres `DROP DATABASE` refuses the connected database.
 - The guard is **best-effort, not airtight**: it only inspects the invoking shell. Another terminal sitting inside the same workspace still gets its cwd pulled out from under it — "current workspace" is per-shell, not global state aworkspace tracks. Accepted tradeoff; the guard catches the common case (archiving the one you're standing in).
 
-**Library contract** (the CLI maps prompts onto this): a `Force` flag skips the guard; without it, archive-of-dirty returns a sentinel error the CLI turns into a confirmation prompt.
+**Library contract** (the CLI maps onto this): a `Force` flag skips the guard; without it, archive-of-dirty returns an error naming the unsafe worktrees. **`--force` is the confirmation — there is no interactive prompt.** aworkspace is agent-driven; a y/N prompt would serve only the human-at-terminal case, and agents (plus CI/pipes) would hit the non-TTY path and need `--force` anyway. Typing the scarier flag is the speed bump.
 
 ### prune: unpushed-commit detection (decided)
 
@@ -340,10 +365,14 @@ Goal: Get the basic workspace management working. Create, list, and manage works
 - [x] **`aworkspace archive [workspace]`** — Safe-by-default archive (detach worktrees, keep the record, move to `_archive/`). Dirty (uncommitted/untracked) worktrees need `--force`/confirm; clean ones go through silently. No tool-provided destroyer in 0.1 — manual `rm -rf _archive/<name>` is the recourse. See "Workspace Lifecycle" above.
 - [x] **`aworkspace remove-repo <repo>`** — Inverse of `add-repo`: detach the repo's worktree, drop it from `.aworkspace.toml`. Dirty worktree needs `--force`. Refuses when cwd is at/under the worktree (guard parity with `archive`). Keeps the branch in the bare.
   - Branch cleanup: **decided — none.** The tool never deletes branches (see "Branch model").
-- [ ] **Extra-worktree safety** — `archive` scans the worktree subdir for every worktree (not only repos in `.aworkspace.toml`) and applies the dirty + orphan-commit checks to each; `remove-repo` warns when the repo has extra worktrees. See "Extra worktrees" in Design Notes.
+- [x] **Extra-worktree safety (archive)** — `archive` discovers owned worktrees bare-driven (`git -C <bare> worktree list`, filtered to this workspace), so primaries *and* agent-created extras on our bares get the dirty + orphan-commit gate and `git worktree remove` (replaces `rm -rf code/`); kill switch dropped. Foreign worktrees excluded for free (not on our bares), ride into the archive untouched. See "Extra worktrees" and "archive: dirty detection" in Design Notes.
+- [ ] **`remove-repo` warns on extra worktrees** — when the repo has extra worktrees on its bare, list them (reuses `WorktreesByRepo`). Still removes the primary only. See "Extra worktrees" in Design Notes.
+- [ ] **Foreign-worktree visibility** (deferred) — filesystem walk to detect worktrees *not* on our bares; emit archive-time warning (move breaks their registration, `git worktree repair` recovers) and a `doctor` report. Visibility only — foreign handling is already correct without it.
 - [ ] **Worktree guidance in generated `CLAUDE.md`** — location (`code/<repo>--<task>`), always on a branch, creator cleans up.
 - [ ] **Checkout roles** — advisory `role` field per repo (`edit` default, `reference`), surfaced to agents via the generated `CLAUDE.md`. No mechanical effect. See "Checkout roles" in Design Notes.
+- [ ] **Format version stamp** — `schema = 1` in root `meta.toml` and each `.aworkspace.toml` (missing = 1); refuse a schema newer than the binary with one clear message; `list` checks root metadata once instead of warning per workspace. See "Format versioning" in Design Notes.
 - [ ] **Better error messages** — User-friendly errors with suggestions
+  - [ ] **`add-repo` on a remote with no commits** — today fails with git's raw `error: Cannot determine remote HEAD` (from `git remote set-head origin --auto`). Detect it after the fetch (`git -C <bare> for-each-ref refs/remotes/origin` is empty) and return a clear message: `repo has no commits yet; push an initial commit, then run add-repo again`. The bare clone may stay — the retry reuses it. Not supported on purpose: a no-branch worktree needs a commit to sit at, and `git worktree add --orphan -b <branch>` would need a branch name, against the branch model. Documented workflow for a brand-new repo: create it with an initial commit (or push one), then `add-repo`.
 
 ### Out of Scope for 0.1
 
@@ -363,7 +392,7 @@ Goal: Get the basic workspace management working. Create, list, and manage works
 - [ ] Archive index — stamp frontmatter into the record + write/regenerate `_archive/INDEX.md` ledger (`archive reindex`); `list --archived`
 - [ ] File-handling conventions — generate default `.gitignore` (worktree subdir + `tmp/` + `secrets/`), archive-exclude `tmp/`/`code/`, keep-but-ignore `secrets/` with size + secrets warnings
 - [ ] `aworkspace prune` for orphaned bare repos (global GC, never a side effect of `archive`) — detects unpushed commits before deleting a bare; confirm/`--force`, never a hard block. See "prune: unpushed-commit detection" above.
-- [ ] `aworkspace update` — fetch; move untouched no-branch repos to the new default-branch tip. Repos on a branch are the user's to rebase (open, see "Branch model").
+- [ ] `aworkspace update` — fetch; move untouched no-branch repos to the new default-branch tip. Repos on a branch are the user's to rebase (open, see "Branch model"). Before fetching, set the fetch mapping and `origin/HEAD` on each bare (the same setup `add-repo` does), so bares made by older builds heal. See "Healing old bares".
 - [ ] `aworkspace reset` — reset workspace to clean state
 - [ ] Bookmarks for common git hosts
 - [ ] `new --from <workspace>` — seed a new workspace from a live, archived or template workspace (seeded copy, no link). See "Seeding: `new --from`" above.
@@ -374,6 +403,7 @@ Goal: Get the basic workspace management working. Create, list, and manage works
 ## Milestone 0.3 - Quality of Life
 
 - [ ] `aworkspace doctor` — environment checks
+  - Bare repo health (report only): fetch mapping present, `origin/HEAD` set. Points the user at `update` to repair. See "Healing old bares".
 - [ ] Better git URL parsing (support all formats)
 - [ ] Homebrew formula
 - [ ] **Rich `list` output** — flexible formatting like `ls -l`

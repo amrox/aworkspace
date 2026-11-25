@@ -40,15 +40,6 @@ var archiveCmd = &cobra.Command{
 			return fmt.Errorf("cannot archive %q from inside it (cwd %s); cd out first", args[0], startDir)
 		}
 
-		// archive deletes the entire worktree subdir, but the extra-worktree
-		// safety scan isn't built yet, so it would silently remove uncommitted
-		// work in any extra worktree. Disabled until the scan lands (see
-		// ROADMAP "Extra-worktree safety"). Safety hold, not missing code.
-		const archiveDisabled = true
-		if archiveDisabled {
-			return fmt.Errorf("archive disabled: unsafe until the extra-worktree scan lands (see ROADMAP 'Extra-worktree safety')")
-		}
-
 		force, _ := cmd.Flags().GetBool("force")
 		archived, err := ws.Archive(workspace.ArchiveOptions{Force: force}, *cfg)
 		if err != nil {

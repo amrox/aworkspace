@@ -1,8 +1,10 @@
 package workspace
 
 import (
+	"bufio"
 	"bytes"
 	_ "embed"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -379,37 +381,154 @@ func CreateWorkspaceRoot(path string, config Config) error {
 	return writeMetadataFile(wsRootMetaPath, meta)
 }
 
+type Worktree struct {
+	Path     string
+	HEAD     string
+	Branch   string // "" if detached
+	Bare     bool
+	Prunable bool
+}
+
+func parseWorktreeList(out string) []Worktree {
+
+	// EXAMPLE:
+	//
+	// ❯ git -C /Users/amrox/.local/share/aworkspace/repos/github.com/amrox/dotfiles/worktrees/dotfiles1 worktree list --porcelain
+	// worktree /Users/amrox/.local/share/aworkspace/repos/github.com/amrox/dotfiles
+	// bare
+	//
+	// worktree /Users/amrox/Workspaces/hi/code/dotfiles
+	// HEAD fbb7487ee3d69ee86cfe75e83febca1858f6d3b4
+	// branch refs/heads/ws/hi
+	// prunable gitdir file points to non-existent location
+	//
+	// worktree /Users/amrox/Workspaces/test1/code/dotfiles
+	// HEAD 019a06151d0e0fdcc8870dacb967623493400712
+	// branch refs/heads/ws/test1
+
+	var wts []Worktree
+	var cur *Worktree
+	flush := func() {
+		if cur != nil {
+			wts = append(wts, *cur)
+			cur = nil
+		}
+	}
+
+	sc := bufio.NewScanner(strings.NewReader(out))
+	for sc.Scan() {
+		line := sc.Text()
+		if line == "" {
+			flush()
+			continue
+		}
+		key, rest, _ := strings.Cut(line, " ")
+		switch key {
+		case "worktree":
+			flush()
+			cur = &Worktree{Path: rest}
+		case "HEAD":
+			cur.HEAD = rest
+		case "branch":
+			cur.Branch = strings.TrimPrefix(rest, "refs/heads/")
+		case "bare":
+			cur.Bare = true
+		case "prunable":
+			cur.Prunable = true
+		}
+	}
+	flush()
+	return wts
+}
+
+func (ws *Workspace) WorktreesByRepo(config Config) (map[string][]Worktree, error) {
+
+	worktreeMap := make(map[string][]Worktree)
+
+	for name, rc := range ws.Metadata.Repos {
+
+		repo, err := parseRepoURL(rc.URL)
+		if err != nil {
+			return nil, err
+		}
+
+		repoPath := repo.bareRepoPath(config)
+
+		if _, err := os.Stat(repoPath); errors.Is(err, os.ErrNotExist) {
+			worktreeMap[name] = nil // repo in metadata, no bare on disk -> no worktrees here
+			continue
+		} else if err != nil {
+			return nil, err
+		}
+
+		out, err := execGitCommand(config, "-C", repoPath, "worktree", "list", "--porcelain")
+		if err != nil {
+			return nil, err
+		}
+
+		allWorktrees := parseWorktreeList(out)
+		var myWorktrees []Worktree
+
+		for _, wtree := range allWorktrees {
+			if wtree.Bare || wtree.Prunable {
+				continue
+			}
+
+			under, err := isUnderDir(ws.Path, wtree.Path)
+			if err != nil {
+				return nil, err
+			}
+			if under {
+				myWorktrees = append(myWorktrees, wtree)
+			}
+		}
+
+		worktreeMap[name] = myWorktrees
+	}
+
+	return worktreeMap, nil
+}
+
 type ArchiveOptions struct {
 	Force bool
 }
 
 func (ws *Workspace) Archive(archiveOptions ArchiveOptions, config Config) (string, error) {
 
+	worktreeMap, err := ws.WorktreesByRepo(config)
+	if err != nil {
+		return "", err
+	}
+
+	var allWorktrees []Worktree
+	for _, wts := range worktreeMap {
+		allWorktrees = append(allWorktrees, wts...)
+	}
+
 	// -- Step 0: Gates
 
 	if !archiveOptions.Force {
 
 		blocked := false
-		for name := range ws.Metadata.Repos {
 
-			wtPath := ws.WorktreePath(name)
+		for _, wt := range allWorktrees {
 
-			dirty, err := isWorktreeDirty(wtPath, config)
+			dirty, err := isWorktreeDirty(wt.Path, config)
 			if err != nil {
 				return "", err
 			}
 
 			if dirty {
-				LogWarning("worktree %q is dirty; commit or discard changes", wtPath)
+				LogWarning("worktree %q is dirty; commit or discard changes", wt.Path)
 			}
 
-			hasOrphans, err := hasOrphanCommits(wtPath, config)
+			hasOrphans, err := hasOrphanCommits(wt.Path, config)
 			if err != nil {
 				return "", err
 			}
 
 			if hasOrphans {
-				LogWarning("worktree %q has commits on no branch (will be lost); run 'git -C \"%s\" branch <name>' to keep them", wtPath, wtPath)
+				LogWarning("worktree %q has commits on no branch (will be lost); run 'git -C \"%s\" branch <name>' to keep them", wt.Path, wt.Path)
 			}
 
 			blocked = blocked || dirty || hasOrphans
@@ -420,9 +539,23 @@ func (ws *Workspace) Archive(archiveOptions ArchiveOptions, config Config) (stri
 		}
 	}
 
-	// -- Step 1: Capture state
+	// -- Step 1: Detach worktrees
 
-	worktreeSubdir := ws.Metadata.Root.WorktreeSubdir
+	// NOTE: This is NOT atomic. If a removeWorktree call fails, it can leave the workspace in a half-archived state
+	// Unfortunately, there is not an easy way to handle this, so punting for now.
+
+	for name, wts := range worktreeMap {
+		repo, err := parseRepoURL(ws.Metadata.Repos[name].URL)
+		if err != nil {
+			return "", err
+		}
+		bare := repo.bareRepoPath(config)
+		for _, wt := range wts {
+			if err := removeWorktree(bare, wt.Path, archiveOptions.Force, config); err != nil {
+				return "", err
+			}
+		}
+	}
 
 	// -- Step 2: Move workspace to _archive dir
 
@@ -446,21 +579,6 @@ func (ws *Workspace) Archive(archiveOptions ArchiveOptions, config Config) (stri
 
 	if err := os.Rename(ws.Path, dest); err != nil {
 		return "", err
-	}
-
-	// -- Step 3: drop worktrees from the archive, clear bare bookkeeping
-	if err := os.RemoveAll(filepath.Join(dest, worktreeSubdir)); err != nil {
-		return "", err
-	}
-
-	for _, rc := range ws.Metadata.Repos {
-		repo, err := parseRepoURL(rc.URL)
-		if err != nil {
-			return "", err
-		}
-		if _, err := execGitCommand(config, "-C", repo.bareRepoPath(config), "worktree", "prune"); err != nil {
-			return "", err
-		}
 	}
 
 	return dest, nil
