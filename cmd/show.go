@@ -62,7 +62,7 @@ var showCmd = &cobra.Command{
 					ref = wt.HEAD[:7] + " (detached))"
 				}
 
-				fmt.Fprintf(cmd.OutOrStdout(), "    - %s @ %s\n", relPath, wt.Branch)
+				fmt.Fprintf(cmd.OutOrStdout(), "    - %s @ %s\n", relPath, ref)
 			}
 		}
 
