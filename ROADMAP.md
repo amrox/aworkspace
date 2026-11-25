@@ -371,6 +371,7 @@ Goal: Get the basic workspace management working. Create, list, and manage works
 - [ ] **Checkout roles** — advisory `role` field per repo (`edit` default, `reference`), surfaced to agents via the generated `CLAUDE.md`. No mechanical effect. See "Checkout roles" in Design Notes.
 - [ ] **Format version stamp** — `schema = 1` in root `meta.toml` and each `.aworkspace.toml` (missing = 1); refuse a schema newer than the binary with one clear message; `list` checks root metadata once instead of warning per workspace. See "Format versioning" in Design Notes.
 - [ ] **Better error messages** — User-friendly errors with suggestions
+  - [ ] **`add-repo` on a remote with no commits** — today fails with git's raw `error: Cannot determine remote HEAD` (from `git remote set-head origin --auto`). Detect it after the fetch (`git -C <bare> for-each-ref refs/remotes/origin` is empty) and return a clear message: `repo has no commits yet; push an initial commit, then run add-repo again`. The bare clone may stay — the retry reuses it. Not supported on purpose: a no-branch worktree needs a commit to sit at, and `git worktree add --orphan -b <branch>` would need a branch name, against the branch model. Documented workflow for a brand-new repo: create it with an initial commit (or push one), then `add-repo`.
 
 ### Out of Scope for 0.1
 
